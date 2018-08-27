@@ -1,8 +1,7 @@
 # slimy
 (SampLIng-based Method for causalitY)
 
-## Institute for Health Informatics
-## University of Minnesota
+## Institute for Health Informatics, University of Minnesota
 
 - slimy is a collection of Markov chain Monte Carlo (MCMC) 
 samplers implemented in R.
