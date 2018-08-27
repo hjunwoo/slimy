@@ -1,0 +1,16 @@
+Package: slimy
+Type: Package
+Title: (Monte Carlo) SampLIng-based Method for causalitY
+Version: 0.1.0
+Authors: Jun Woo [aut, cre],
+  Sisi Ma [aut]
+Maintainer: Jun Woo <jwoo@umn.edu>
+Depends: R (>= 3.5.0), 
+         graph,
+         gtools
+Description: Uses Gibbs sampling to infer directed acyclic graph (DAG)
+  underlying discrete/continuous data.
+License: GPL (>= 2)
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 6.0.1
