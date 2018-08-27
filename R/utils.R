@@ -187,3 +187,31 @@ hfunc <- function(x, i, parents, par, levels){
   return(x)
 
 }
+
+#' Generate Gaussian random graph
+#' @param p Number of nodes
+#' @param prob Edge probability
+#' @export
+rgraph.gauss <- function(p, prob=0.1){
+
+  r <- r.gauss.pardag(p=p, prob=prob, top.sort=TRUE)
+  nodes <- r$.nodes
+  A <- as(r,'matrix')
+  A <- apply(A,1:2, as.numeric)
+  rownames(A) <- colnames(A) <- nodes
+
+  dag <- graphAM(adjMat=A, edgemode='directed')
+  dag@nodeData@data <- r$.params
+
+  return(dag)
+}
+
+#' Generate simulated gaussian data
+simulate.gauss <- function(dag, nsample){
+
+  r <- new('GaussParDAG', nodes=nodes(dag),in.edges=inEdges(dag),
+           params=dag@nodeData@data)
+  xi <- r$simulate(nsample)
+
+  return(xi)
+}

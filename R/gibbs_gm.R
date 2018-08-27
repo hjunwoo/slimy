@@ -1,7 +1,7 @@
 # Partition parent sets using GM algorithm
 #
-partition.pset <- function(A, xi, q, ac, path, kappa=3, progress.bar=FALSE,
-                           discrete=TRUE, score){
+partition.pset <- function(A, xi, q, ac, path, kappa=3, cache,
+                           progress.bar=FALSE, discrete=TRUE, score){
 
   p <- nrow(A)
   nodes <- rownames(A)
@@ -37,7 +37,6 @@ partition.pset <- function(A, xi, q, ac, path, kappa=3, progress.bar=FALSE,
 
   KH <- NULL
   ngrid <- nrow(grid)
-  if(progress.bar) pb <- txtProgressBar(style=3)
   for(m in seq_len(ngrid)){
 
     Hk <- H
@@ -82,27 +81,16 @@ partition.pset <- function(A, xi, q, ac, path, kappa=3, progress.bar=FALSE,
 
       Pawgh[[eta]][[w]] <- pawgh
       sc <- NULL
-      aw <- A
-      plist <- w
-      for(i in pawgh)
-        plist <- union(plist, rownames(ac)[which(ac[,i]==1)])
-      aw <- aw[plist,plist]
-      aw[,w] <- 0
       for(i in pawgh){
-        pa <- rownames(ac)[which(ac[,i]==1)]
-        aw[pa,w] <- 1
-        gw <- graphAM(adjMat=aw, edgemode='directed')
-        e <- multinom.score(xi=xi[,plist], dag=gw)
+        e <- cache[w,i]
         sc <- c(sc, e)
       }
       lsc <- log(sum(exp(sc-max(sc)))) + max(sc)
       lkh <- lkh + lsc
     }
     KH <- c(KH,lkh)
-    if(progress.bar) setTxtProgressBar(pb, m/ngrid)
   }
   KH <- KH - max(KH)
-  if(progress.bar) close(pb)
 
   h <- list(PaH=Pawgh, KH=KH)
   return(h)

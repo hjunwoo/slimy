@@ -104,13 +104,53 @@ parent.sets <- function(nodes, kappa=3){
   rownames(ac) <- nodes
   a <- diag(p)
   if(kappa > 0) ac <- cbind(ac,a)
-  if(kappa > 1) for(i in seq(1,p-1)) for(j in seq(i+1,p))
+  if(kappa > 1 & p > 1) for(i in seq(1,p-1)) for(j in seq(i+1,p))
     ac <- cbind(ac, a[,i] | a[,j])
-  if(kappa > 2)
-    if(p > 2)
+  if(kappa > 2 & p > 2)
       for(i in seq(1,p-2)) for(j in seq(i+1,p-1)) for(k in seq(j+1,p))
         ac <- cbind(ac, a[,i] | a[,j] | a[,k])
   # columns of ac = repertoire of all parent sets
   if(kappa > 3) stop('Maximum in-degree is limited to <=3')
   return(ac)
+}
+
+# computes local score conditional to all possible parent sets for each node
+
+local.score <- function(xi, ac, kappa, discrete=TRUE, score=NULL,
+                        progress.bar=FALSE){
+
+  nodes <- colnames(xi)
+  p <- length(nodes)
+  cache <- matrix(0, nrow=p, ncol=ncol(ac))
+  rownames(cache) <- nodes
+
+  cat('Computing local scores ...\n')
+
+  if(progress.bar) pb <- txtProgressBar(style=3)
+
+  for(k in seq_len(ncol(ac))){
+    pa <- nodes[which(ac[,k]==1)]
+    for(i in seq_len(p)){
+      w <- nodes[i]
+      if(w %in% pa) sc <- NA
+      else{
+        wpa <- nodes[nodes %in% c(w,pa)]
+        nw <- length(wpa)
+        A <- matrix(0, nrow=nw, ncol=nw)
+        rownames(A) <- colnames(A) <- wpa
+        A[pa,w] <- 1
+        if(!isValidGraph(A,type='dag')) sc <- NA
+        else{
+          if(discrete) sc <- multinom.local.score(xi, w, pa)
+          else
+            sc <- score$local.score(vertex=which(w==nodes),
+                                       parents=match(pa,nodes))
+        }
+      }
+      cache[i,k] <- sc
+    }
+    if(progress.bar) setTxtProgressBar(pb, k/ncol(ac))
+  }
+  if(progress.bar) close(pb)
+  return(cache)
 }

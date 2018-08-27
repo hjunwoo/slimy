@@ -1,15 +1,17 @@
 Package: slimy
 Type: Package
-Title: (Monte Carlo) SampLIng-based Method for causalitY
+Title: slimy: (Monte Carlo) SampLIng-based Method for causalitY
 Version: 0.1.0
-Authors: Jun Woo [aut, cre],
-  Sisi Ma [aut]
+Authors: Jun Woo [aut, cre], Sisi Ma [aut]
 Maintainer: Jun Woo <jwoo@umn.edu>
-Depends: R (>= 3.5.0), 
+Depends: R (>= 3.5.0),
+         pcalg,
          graph,
          gtools
-Description: Uses Gibbs sampling to infer directed acyclic graph (DAG)
-  underlying discrete/continuous data.
+Description: Uses Markov chain Monte Carlo sampling to 
+  infer directed acyclic graph (DAG) underlying discrete/continuous data.
+  Algorithms used include the parent set-based Gibbs sampling technique 
+  by Goudie and Mukherjee.  
 License: GPL (>= 2)
 Encoding: UTF-8
 LazyData: true
