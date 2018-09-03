@@ -18,8 +18,8 @@
 mc.sample <- function(xi, dag=NULL, ref=NULL,
                       discrete=FALSE,
                       nstep=1000, Big=100, verbose=3, method='gibbs',
-                      scoring='ml', representation='gm',
-                      progress.bar=FALSE, burn.in=100,
+                      scoring='ml', representation='gm', cache=NULL,
+                      progress.bar=FALSE, burn.in=100, map=FALSE,
                       hyper=NULL, q=2, npr=100, nplot=npr, kappa=3){
 
   m <- nrow(xi) # no. of samples
@@ -49,7 +49,8 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
   if(method=='gibbs'){
     ac <- parent.sets(nodes=colnames(xi), kappa)
     if(representation=='gm'){
-      cache <- local.score(xi=xi, ac=ac, kappa=kappa, discrete=discrete,
+      if(is.null(cache))
+        cache <- local.score(xi=xi, ac=ac, kappa=kappa, discrete=discrete,
                            score=score, progress.bar=progress.bar)
       path <- path.count(dag=dag)$C
     }
@@ -58,6 +59,8 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
   istep <- iburned <- 0
   edge.prob <- matrix(0, nrow=p, ncol=p)   # edge.probability
   rownames(edge.prob) <- colnames(edge.prob) <- nodes
+  Map <- NULL   # MAP graph and its score
+
   while(TRUE){
 
     if(method=='metropolis'){
@@ -164,7 +167,7 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
     }
     else stop('Unknown method')
 
-    if(verbose==2){
+    if(verbose>=2){
       if(!is.null(ref)){
         d <- distance(m=A, mref=as(ref,'matrix'))
         cnt <- cnt + 1
@@ -177,16 +180,19 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
         else
           llk <- score$global.score(as(A,'GaussParDAG'))
         cat('istep = ',istep,', log LK = ',llk,', mean distance = ',
-            sumd/cnt,sep='')
-        if(is.null(ref) | verbose < 3) cat('\n')
+            sumd/cnt,'\n',sep='')
         if(istep %% nplot==0){
           plot(ref, main='True')
           plot(graphAM(adjMat=A,edgemode='directed'), main=paste0('Distance=',d))
         }
         sumd <- cnt <- 0
-        if(istep>burn.in){
+        if(istep > burn.in){
           iburned <- iburned + 1
           edge.prob <- edge.prob + A
+          if(is.null(Map))
+            Map <- list(dag=ddag, score=llk)
+          else if(llk > Map$score)
+            Map <- list(dag=ddag, score=llk)
         }
       }
     }
@@ -195,8 +201,9 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
   colnames(A) <- colnames(xi)
   dag <- graphAM(adjMat=A, edgemode='directed')
   edge.prob <- edge.prob/iburned
+  z <- list(dag=dag, map=Map, edge.prob=edge.prob)
 
-  return(list(dag=dag, edge.prob=edge.prob))
+  return(z)
 }
 
 neighbor <- function(A){
@@ -211,4 +218,19 @@ neighbor <- function(A){
   }
 
   return(nbr)
+}
+
+#' Enumerate and store local scores of all parent sets
+#' @export
+
+compute.score <- function(xi, kappa=3, discrete=FALSE, scoring='ml', progress.bar=TRUE){
+
+  ac <- parent.sets(nodes=colnames(xi), kappa)
+  if(!discrete)
+    if(scoring=='ml') score <- new('GaussL0penObsScore',xi)
+
+  cache <- local.score(xi=xi, ac=ac, kappa=kappa, discrete=discrete,
+                       score=score, progress.bar=progress.bar)
+
+  return(cache)
 }
