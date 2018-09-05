@@ -116,8 +116,9 @@ parent.sets <- function(nodes, kappa=3){
 
 # computes local score conditional to all possible parent sets for each node
 
-local.score <- function(xi, ac, kappa, discrete=TRUE, score=NULL,
-                        progress.bar=FALSE){
+local.score <- function(xi, ac, kappa, discrete=TRUE, scoring='ml',
+                        score=NULL, g=NULL,
+                        hyper=NULL, progress.bar=FALSE){
 
   nodes <- colnames(xi)
   p <- length(nodes)
@@ -127,6 +128,9 @@ local.score <- function(xi, ac, kappa, discrete=TRUE, score=NULL,
   cat('Computing local scores ...\n')
 
   if(progress.bar) pb <- txtProgressBar(style=3)
+
+  A0 <- matrix(0, nrow=p, ncol=p)
+  rownames(A0) <- colnames(A0) <- nodes
 
   for(k in seq_len(ncol(ac))){
     pa <- nodes[which(ac[,k]==1)]
@@ -142,9 +146,20 @@ local.score <- function(xi, ac, kappa, discrete=TRUE, score=NULL,
         if(!isValidGraph(A,type='dag')) sc <- NA
         else{
           if(discrete) sc <- multinom.local.score(xi, w, pa)
-          else
+          else if(scoring=='ml')
             sc <- score$local.score(vertex=which(w==nodes),
                                        parents=match(pa,nodes))
+          else if(scoring=='bge'){
+            par <- hyper.par(xi=xi, nu=hyper$nu, alpha=hyper$alpha,
+                             v=hyper$v, mu0=hyper$mu0, Sig=hyper$Sig)
+            A1 <- A
+            A1[pa,w] <- 1
+            sc <- mvn.score(xi=xi, hyper.par=par, A=A1)
+          }
+          else if(scoring=='g-score'){
+            sc <- g.score(xi=xi, node=w, pa=pa, g=g)
+          }
+          else stop('Unknown scoring')
         }
       }
       cache[i,k] <- sc
@@ -152,5 +167,6 @@ local.score <- function(xi, ac, kappa, discrete=TRUE, score=NULL,
     if(progress.bar) setTxtProgressBar(pb, k/ncol(ac))
   }
   if(progress.bar) close(pb)
+
   return(cache)
 }

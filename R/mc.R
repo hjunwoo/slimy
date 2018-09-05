@@ -20,18 +20,16 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
                       nstep=1000, Big=100, verbose=3, method='gibbs',
                       scoring='ml', representation='gm', cache=NULL,
                       progress.bar=FALSE, burn.in=100, map=FALSE,
-                      hyper=NULL, q=2, npr=100, nplot=npr, kappa=3){
+                      hyper=NULL, q=2, npr=100, nplot=npr, kappa=3,
+                      g=1e10){
 
   m <- nrow(xi) # no. of samples
   p <- ncol(xi) # no. of nodes
   nodes <- colnames(xi)
 
-  if(is.null(dag)){
-    if(discrete)
-      dag <- rgraph(nodes=nodes,mean.degree=1.0)
-    else
-      dag <- rgraph.gauss(p=p, prob=.1)
-  }
+  if(is.null(dag))
+      dag <- rgraph(nodes=nodes,discrete=discrete,mean.degree=0.1,
+                    max.degree=kappa)
   A <- as(dag,'matrix')
   A <- apply(A,1:2,as.numeric)
   colnames(A) <- colnames(xi)
@@ -39,21 +37,27 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
   sumd <- 0
   cnt <- 0
 
+  if(method=='gibbs')
+    ac <- parent.sets(nodes=colnames(xi), kappa)
+
   if(discrete)
     s1 <- sc <- multinom.score(xi=xi, dag=dag)
   else{
     if(scoring=='ml') score <- new('GaussL0penObsScore',xi)
-    else s1 <- sc <- mvn.score(xi=xi, hyper=hyper, A=A)
+    else if(scoring=='bge')
+      s1 <- sc <- mvn.score(xi=xi, hyper=hyper, A=A)
+    else if(scoring=='g-score')
+      s1 <- sc <- g.score.global(xi=xi, A=A, g=g, ac=ac, cache=cache)
+    else stop('Unknown scoring.')
   }
 
-  if(method=='gibbs'){
-    ac <- parent.sets(nodes=colnames(xi), kappa)
-    if(representation=='gm'){
-      if(is.null(cache))
-        cache <- local.score(xi=xi, ac=ac, kappa=kappa, discrete=discrete,
-                           score=score, progress.bar=progress.bar)
-      path <- path.count(dag=dag)$C
-    }
+  if(method=='gibbs' & representation=='gm'){
+    if(is.null(cache))
+      cache <- local.score(xi=xi, ac=ac, kappa=kappa,
+                             discrete=discrete, scoring=scoring,
+                             score=score, hyper=hyper, g=g,
+                             progress.bar=progress.bar)
+    path <- path.count(dag=dag)$C
   }
 
   istep <- iburned <- 0
@@ -76,8 +80,11 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
       else{
         if(scoring=='ml')
           s0 <- score$local.score(vertex=j,parents=which(A1[j]!=0))/nrow(nbr)
-        else
+        else if(scoring=='bge')
           s0 <- mvn.score(xi=xi, hyper=hyper, A=A1)/nrow(nbr)
+        else if(scoring=='g-score')
+          s0 <- g.score.global(xi=xi, A=A, g=g, ac=ac, cache=cache)
+        else stop('Unknown scoring')
       }
       if(A1[i,j]==1){
         if(runif(n=1)>0.5){
@@ -177,13 +184,19 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
         ddag <- graphAM(adjMat=A,edgemode='directed')
         if(discrete)
           llk <- multinom.score(xi, dag=ddag)
-        else
+        else if(scoring=='ml')
           llk <- score$global.score(as(A,'GaussParDAG'))
+        else if(scoring=='bge')
+          llk <- mvn.score(xi=xi, hyper=hyper, A=A)
+        else if(scoring=='g-score')
+          llk <- g.score.global(xi=xi, A=A, g=g, ac=ac, cache=cache)
+        else stop('Unknown scoring')
         cat('istep = ',istep,', log LK = ',llk,', mean distance = ',
             sumd/cnt,'\n',sep='')
         if(istep %% nplot==0){
           plot(ref, main='True')
-          plot(graphAM(adjMat=A,edgemode='directed'), main=paste0('Distance=',d))
+          plot(graphAM(adjMat=A,edgemode='directed'),
+               main=paste0('Distance=',d))
         }
         sumd <- cnt <- 0
         if(istep > burn.in){
@@ -223,14 +236,27 @@ neighbor <- function(A){
 #' Enumerate and store local scores of all parent sets
 #' @export
 
-compute.score <- function(xi, kappa=3, discrete=FALSE, scoring='ml', progress.bar=TRUE){
+compute.score <- function(xi, kappa=3, discrete=FALSE, scoring='ml',
+                          hyper=NULL, g=NULL, progress.bar=TRUE){
 
   ac <- parent.sets(nodes=colnames(xi), kappa)
   if(!discrete)
     if(scoring=='ml') score <- new('GaussL0penObsScore',xi)
 
+  if(scoring=='bge'){
+    if(is.null(hyper)) stop('Hyperparameters for bge score missing')
+    B <- hyper$B
+    n <- nrow(B)
+    W <- precision(v=hyper$v, B=B)
+    Sig <- solve(a=W, b=diag(n))
+    rownames(Sig) <- colnames(Sig) <- rownames(B)
+    hyper <- list(nu=hyper$nu, alpha=hyper$alpha, v=hyper$v,
+                mu0=hyper$mu0, Sig=Sig)
+  }
+
   cache <- local.score(xi=xi, ac=ac, kappa=kappa, discrete=discrete,
-                       score=score, progress.bar=progress.bar)
+                       scoring=scoring, score=score, g=g, hyper=hyper,
+                       progress.bar=progress.bar)
 
   return(cache)
 }

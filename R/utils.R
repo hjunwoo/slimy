@@ -70,11 +70,14 @@ mat2nel <- function(nodes, A){
 #' @param mean.degree Mean in-degree per node (Poisson lambda)
 #' @param max.degree Upper bound for in-degree
 #' @param levels Levels for each variable
+#' @param discrete Discrete or continuous
 #' @param alpha Hyperparameter for dirichlet-distributed distributions for
 #'        conditional probability
+#' @param brange Lower and upper bound of regression coefficients for edges
 #' @export
 rgraph <- function(dag=NULL, nodes=NULL, mean.degree=1, max.degree=Inf,
-                   levels=c('1','2'), alpha=NULL){
+                   levels=c('1','2'), discrete=TRUE, alpha=NULL,
+                   brange=c(0.1,1)){
 
   if(!is.null(dag)){
     nodes <- nodes(dag)
@@ -82,7 +85,7 @@ rgraph <- function(dag=NULL, nodes=NULL, mean.degree=1, max.degree=Inf,
   }
   p <- length(nodes)
   nlevels <- length(levels)
-  if(is.null(alpha)) alpha <- rep(1,nlevels)
+  if(discrete) if(is.null(alpha)) alpha <- rep(1,nlevels)
 
   if(is.null(dag)){
     A <- matrix(0, nrow=p, ncol=p)
@@ -110,23 +113,31 @@ rgraph <- function(dag=NULL, nodes=NULL, mean.degree=1, max.degree=Inf,
 
   for(k in seq_len(p)){
     np <- sum(A1[,k]!=0)
-    if(np==0)
-      prob[[k]] <- rdirichlet(n=1,alpha=alpha)  # marginal distribution
-    else{
-      prob[[k]] <- rdirichlet(n=nlevels^np, alpha=alpha)
+    if(discrete){
+      if(np==0)
+        prob[[k]] <- rdirichlet(n=1,alpha=alpha)  # marginal distribution
+      else{
+        prob[[k]] <- rdirichlet(n=nlevels^np, alpha=alpha)
+      }
     }
+    else if(np >0)
+      prob[[k]] <- runif(n=np, min=brange[1], max=brange[2])
     if(np>0){
-      tmp <- list()
-      for(l in seq_len(np)) tmp[[l]] <- levels
-      eg <- expand.grid(tmp)
-      if(np==1) ename <- levels
-      else
-        ename <- apply(eg,1,
+      if(discrete){
+        tmp <- list()
+        for(l in seq_len(np)) tmp[[l]] <- levels
+        eg <- expand.grid(tmp)
+        if(np==1) ename <- levels
+        else
+          ename <- apply(eg,1,
                      function(x){z <- paste0(x,collapse=',');
                                  return(paste0('(',z,')',collapse=''))})
-      rownames(prob[[k]]) <- ename
+        rownames(prob[[k]]) <- ename
+      }
+      else names(prob[[k]]) <- nodes[which(A1[,k]!=0)]
     }
-    node_levels[[k]] <- levels
+    if(discrete)
+      node_levels[[k]] <- levels
   }
 
   g <- graphAM(adjMat=A1,edgemode='directed')
@@ -138,7 +149,7 @@ rgraph <- function(dag=NULL, nodes=NULL, mean.degree=1, max.degree=Inf,
 
 #' Generate simulated data for discrete graph
 #' @export
-simulate.data <- function(dag, nsample){
+simulate.data <- function(dag, nsample, sd=1.0){
 
   nodes <- nodes(dag)
   parents <- inEdges(dag)
@@ -150,7 +161,7 @@ simulate.data <- function(dag, nsample){
   for(k in seq_len(nsample)){
     x <- NULL
     for(i in seq_len(p)){
-      x <- hfunc(x, i, parents, par, levels)
+      x <- hfunc(x, i, parents, par, levels, sd=sd)
       if(length(x)==p) break
     }
     x <- x[match(nodes,names(x))]
@@ -162,27 +173,42 @@ simulate.data <- function(dag, nsample){
   return(xi)
 }
 
-hfunc <- function(x, i, parents, par, levels){
+hfunc <- function(x, i, parents, par, levels, sd=1){
 
   nodes <- names(parents)
   if(nodes[i] %in% names(x)) return(x)
   np <- length(parents[[i]])
   values <- levels[[i]]
-  if(np==0)
-    prob <- par[[i]][1,]
+  discrete <- !is.null(values)
+  if(np==0){    # a root node
+    if(discrete) prob <- par[[i]][1,]
+    else xm <- 0
+  }
   else{
     for(k in seq_len(np)){
       if(!(parents[[i]][k]%in% names(x)))
         x <- hfunc(x, i=which(nodes==parents[[i]][k]),
-                 parents, par, levels)
+                 parents=parents, par=par, levels=levels, sd=sd)
     }
     v <- x[parents[[i]]]
-    irow <- paste0(v,collapse=',')
-    if(np > 1) irow <- paste0('(',irow,')',collapse='')
-    prob <- par[[i]][irow,]
+    if(discrete){
+      irow <- paste0(v,collapse=',')
+      if(np > 1) irow <- paste0('(',irow,')',collapse='')
+      prob <- par[[i]][irow,]
+    }
+    else{
+      xm <- 0
+      for(xp in parents[[i]])
+        xm <- xm + par[[i]][xp]*v[xp]
+    }
   }
-  ix <- sample(x=values, size=1, prob=prob)
-  names(ix) <- names(par)[i]
+  if(discrete)
+    ix <- sample(x=values, size=1, prob=prob)
+  else{
+    ix <- rnorm(n=1, mean=xm, sd=sd)
+    names(ix) <- nodes[i]
+  }
+
   x <- c(x,ix)
   return(x)
 
