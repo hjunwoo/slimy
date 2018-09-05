@@ -21,7 +21,7 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
                       scoring='ml', representation='gm', cache=NULL,
                       progress.bar=FALSE, burn.in=100, map=FALSE,
                       hyper=NULL, q=2, npr=100, nplot=npr, kappa=3,
-                      g=1e10){
+                      g=1e10, ncores=1){
 
   m <- nrow(xi) # no. of samples
   p <- ncol(xi) # no. of nodes
@@ -56,7 +56,7 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
       cache <- local.score(xi=xi, ac=ac, kappa=kappa,
                              discrete=discrete, scoring=scoring,
                              score=score, hyper=hyper, g=g,
-                             progress.bar=progress.bar)
+                             progress.bar=progress.bar, ncores=ncores)
     path <- path.count(dag=dag)$C
   }
 
@@ -140,7 +140,8 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
       else if(representation=='gm'){    # goudie-mukherjee
 
         Pawgh <- partition.pset(A=A, xi=xi, q=q, ac=ac, path=path,
-                      kappa=kappa,cache=cache, progress.bar=progress.bar)
+                      kappa=kappa,cache=cache, progress.bar=progress.bar,
+                      ncores=ncores)
         nh <- length(Pawgh$PaH)
         prob <- exp(Pawgh$KH)
         prob <- prob/sum(prob)
@@ -237,7 +238,8 @@ neighbor <- function(A){
 #' @export
 
 compute.score <- function(xi, kappa=3, discrete=FALSE, scoring='ml',
-                          hyper=NULL, g=NULL, progress.bar=TRUE){
+                          hyper=NULL, g=NULL, progress.bar=TRUE,
+                          ncores=1){
 
   ac <- parent.sets(nodes=colnames(xi), kappa)
   if(!discrete)
@@ -256,7 +258,7 @@ compute.score <- function(xi, kappa=3, discrete=FALSE, scoring='ml',
 
   cache <- local.score(xi=xi, ac=ac, kappa=kappa, discrete=discrete,
                        scoring=scoring, score=score, g=g, hyper=hyper,
-                       progress.bar=progress.bar)
+                       progress.bar=progress.bar, ncores=ncores)
 
   return(cache)
 }

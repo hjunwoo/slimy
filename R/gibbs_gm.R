@@ -1,7 +1,7 @@
 # Partition parent sets using GM algorithm
 #
 partition.pset <- function(A, xi, q, ac, path, kappa=3, cache,
-                           progress.bar=FALSE, discrete=TRUE, score){
+                           progress.bar=FALSE, ncores=1){
 
   p <- nrow(A)
   nodes <- rownames(A)
@@ -32,68 +32,105 @@ partition.pset <- function(A, xi, q, ac, path, kappa=3, cache,
   grid <- expand.grid(idx)
   colnames(grid) <- W
 
+  ngrid <- nrow(grid)
+  bundle <- list(W=W, H=H, hac=hac, dew=dew, ndw=ndw, nd=nd, ac=ac,
+                 nodes=nodes, cache=cache, grid=grid, q=q)
+  if(ncores==1)
+    hgraph <- lapply(seq_len(ngrid), FUN=h.graph, bundle)
+  else{
+#   Rmpi::mpi.spawn.Rslaves(nslaves=ncores)
+#   Rmpi::mpi.bcast.cmd(library(slimy))
+    Rmpi::mpi.bcast.Robj2slave(bundle)
+    hgraph <- Rmpi::mpi.applyLB(seq_len(ngrid), FUN=h.graph, bundle)
+#   Rmpi::mpi.close.Rslaves()
+#   Rmpi::mpi.finalize()
+  }
+
   Pawgh <- list()   # list of parent sets of w partitioned into H
   eta <- 0          # partition count
-
   KH <- NULL
-  ngrid <- nrow(grid)
   for(m in seq_len(ngrid)){
-
-    Hk <- H
-    for(w in W) Hk[,w] <- hac[,grid[m,w]]
-    if(!isValidGraph(Hk,type='dag')) next
+    z <- hgraph[[m]]
+    if(is.null(z$Pawgh)) next  # not a valid DAG
     eta <- eta + 1
-    Pawgh[[eta]] <- vector('list', q)
-    names(Pawgh[[eta]]) <- W
-
-    lkh <- 0
-    for(w in W){
-      nx <- sum(Hk[,w])
-      x <- rownames(Hk)[Hk[,w]==1]   # pa_w^H
-      deghw <- NULL
-      for(ix in x) deghw <- union(deghw, dew[[ix]])
-      y <- rownames(Hk)[Hk[,w]==0]   # y not pa_w^H
-      denhw <- NULL
-      for(iy in y) denhw <- union(denhw, dew[[iy]])
-      qwh <- union(nd, deghw)
-      qwh <- qwh[!(qwh%in%denhw)]    # (nd U de_w) \ de_-w
-
-      pawA <- NULL
-      for(v in nodes[!(nodes %in% qwh)])
-        pawA <- union(pawA, which(ac[w,]==0 & ac[v,]==1)) # Pa_w^{all}(v)
-
-      pawB <- seq_len(ncol(ac))
-      for(ix in x){
-        rwh <- dew[[ix]]
-        rwh <- rwh[!(rwh%in%denhw)]  # R_w,x = de_x \ de_{-w}
-        U <- NULL
-        for(r in rwh)
-          U <- union(U, which(ac[w,]==0 & ac[r,]==1))
-        pawB <- intersect(pawB, U)
-      }
-
-      if(nx==0){
-        pawgh <- which(ac[w,]==0)
-        pawgh <- pawgh[!(pawgh %in% pawA)]
-      }
-      else
-        pawgh <- pawB[!(pawB %in% pawA)]  # these are column indices of ac
-
-      Pawgh[[eta]][[w]] <- pawgh
-      sc <- NULL
-      for(i in pawgh){
-        e <- cache[w,i]
-        sc <- c(sc, e)
-      }
-      lsc <- log(sum(exp(sc-max(sc)))) + max(sc)
-      lkh <- lkh + lsc
-    }
-    KH <- c(KH,lkh)
+    Pawgh[[eta]] <- z$Pawgh
+    KH <- c(KH, z$kh)
   }
   KH <- KH - max(KH)
 
   h <- list(PaH=Pawgh, KH=KH)
   return(h)
+}
+
+h.graph <- function(m, bundle){
+
+  W <- bundle$W
+  H <- bundle$H
+  hac <- bundle$hac
+  dew <- bundle$dew
+  ndw <- bundle$ndw
+  nd <- bundle$nd
+  ac <- bundle$ac
+  nodes <- bundle$nodes
+  cache <- bundle$cache
+  grid <- bundle$grid
+  q <- bundle$q
+
+  Hk <- H
+  for(w in W) Hk[,w] <- hac[,grid[m,w]]
+  if(!pcalg::isValidGraph(Hk,type='dag')){
+    z <- list(Pawgh=NULL, kh=NULL)
+    return(z)
+  }
+
+  Pawgh <- vector('list', q)
+  names(Pawgh) <- W
+
+  lkh <- 0
+  for(w in W){
+    nx <- sum(Hk[,w])
+    x <- rownames(Hk)[Hk[,w]==1]   # pa_w^H
+    deghw <- NULL
+    for(ix in x) deghw <- union(deghw, dew[[ix]])
+    y <- rownames(Hk)[Hk[,w]==0]   # y not pa_w^H
+    denhw <- NULL
+    for(iy in y) denhw <- union(denhw, dew[[iy]])
+    qwh <- union(nd, deghw)
+    qwh <- qwh[!(qwh%in%denhw)]    # (nd U de_w) \ de_-w
+
+    pawA <- NULL
+    for(v in nodes[!(nodes %in% qwh)])
+      pawA <- union(pawA, which(ac[w,]==0 & ac[v,]==1)) # Pa_w^{all}(v)
+
+    pawB <- seq_len(ncol(ac))
+    for(ix in x){
+      rwh <- dew[[ix]]
+      rwh <- rwh[!(rwh%in%denhw)]  # R_w,x = de_x \ de_{-w}
+      U <- NULL
+      for(r in rwh)
+        U <- union(U, which(ac[w,]==0 & ac[r,]==1))
+      pawB <- intersect(pawB, U)
+    }
+
+    if(nx==0){
+      pawgh <- which(ac[w,]==0)
+      pawgh <- pawgh[!(pawgh %in% pawA)]
+    }
+    else
+      pawgh <- pawB[!(pawB %in% pawA)]  # these are column indices of ac
+
+    Pawgh[[w]] <- pawgh
+    sc <- NULL
+    for(i in pawgh){
+      e <- cache[w,i]
+      sc <- c(sc, e)
+    }
+    lsc <- log(sum(exp(sc-max(sc)))) + max(sc)
+    lkh <- lkh + lsc
+  }
+
+  z <- list(Pawgh=Pawgh, kh=lkh)
+  return(z)
 }
 
 # path count matrix for transitive closure

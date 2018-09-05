@@ -118,7 +118,7 @@ parent.sets <- function(nodes, kappa=3){
 
 local.score <- function(xi, ac, kappa, discrete=TRUE, scoring='ml',
                         score=NULL, g=NULL,
-                        hyper=NULL, progress.bar=FALSE){
+                        hyper=NULL, progress.bar=FALSE, ncores=1){
 
   nodes <- colnames(xi)
   p <- length(nodes)
@@ -127,46 +127,78 @@ local.score <- function(xi, ac, kappa, discrete=TRUE, scoring='ml',
 
   cat('Computing local scores ...\n')
 
-  if(progress.bar) pb <- txtProgressBar(style=3)
+  bundle <- list(xi=xi, ac=ac, hyper=hyper, discrete=discrete,
+                 scoring=scoring, g=g)  # parameter set
 
-  A0 <- matrix(0, nrow=p, ncol=p)
-  rownames(A0) <- colnames(A0) <- nodes
-
-  for(k in seq_len(ncol(ac))){
-    pa <- nodes[which(ac[,k]==1)]
-    for(i in seq_len(p)){
-      w <- nodes[i]
-      if(w %in% pa) sc <- NA
-      else{
-        wpa <- nodes[nodes %in% c(w,pa)]
-        nw <- length(wpa)
-        A <- matrix(0, nrow=nw, ncol=nw)
-        rownames(A) <- colnames(A) <- wpa
-        A[pa,w] <- 1
-        if(!isValidGraph(A,type='dag')) sc <- NA
-        else{
-          if(discrete) sc <- multinom.local.score(xi, w, pa)
-          else if(scoring=='ml')
-            sc <- score$local.score(vertex=which(w==nodes),
-                                       parents=match(pa,nodes))
-          else if(scoring=='bge'){
-            par <- hyper.par(xi=xi, nu=hyper$nu, alpha=hyper$alpha,
-                             v=hyper$v, mu0=hyper$mu0, Sig=hyper$Sig)
-            A1 <- A
-            A1[pa,w] <- 1
-            sc <- mvn.score(xi=xi, hyper.par=par, A=A1)
-          }
-          else if(scoring=='g-score'){
-            sc <- g.score(xi=xi, node=w, pa=pa, g=g)
-          }
-          else stop('Unknown scoring')
-        }
-      }
-      cache[i,k] <- sc
+  nac <- ncol(ac)  # no. of parent sets
+  if(ncores==1){
+    if(progress.bar) pb <- txtProgressBar(style=3)
+    lcache <- list()
+    for(iac in seq_len(nac)){
+      lcache[[iac]] <- fill.cache(iac, bundle)
+      if(progress.bar) setTxtProgressBar(pb, iac/nac)
     }
-    if(progress.bar) setTxtProgressBar(pb, k/ncol(ac))
+    if(progress.bar) close(pb)
   }
-  if(progress.bar) close(pb)
+  else{            # parallel
+#   Rmpi::mpi.spawn.Rslaves(nslaves=ncores)
+#   Rmpi::mpi.bcast.cmd(library(slimy))    # these are done outside
+    Rmpi::mpi.bcast.Robj2slave(bundle)
+    lcache <- Rmpi::mpi.applyLB(seq_len(nac), FUN=fill.cache, bundle)
+#   Rmpi::mpi.close.Rslaves()
+#   Rmpi::mpi.finalize()   # appears necessary for clean-up
+  }
+
+  for(iac in seq_len(nac))
+    cache[,iac] <- lcache[[iac]]
 
   return(cache)
+}
+
+fill.cache <- function(iac, bundle){
+
+  xi <- bundle$xi
+  ac <- bundle$ac
+  hyper <- bundle$hyper
+  discrete <- bundle$discrete
+  scoring <- bundle$scoring
+  g <- bundle$g
+
+  nodes <- colnames(xi)
+  p <- length(nodes)
+
+  pa <- nodes[which(ac[,iac]==1)]
+  lcache <- c()
+  for(i in seq_len(p)){
+    w <- nodes[i]
+    if(w %in% pa) sc <- NA
+    else{
+      wpa <- nodes[nodes %in% c(w,pa)]
+      nw <- length(wpa)
+      A <- matrix(0, nrow=nw, ncol=nw)
+      rownames(A) <- colnames(A) <- wpa
+      A[pa,w] <- 1
+      if(!pcalg::isValidGraph(A,type='dag')) sc <- NA
+      else{
+        if(discrete) sc <- multinom.local.score(xi, w, pa)
+        else if(scoring=='ml')
+          sc <- score$local.score(vertex=which(w==nodes),
+                                       parents=match(pa,nodes))
+        else if(scoring=='bge'){
+          par <- hyper.par(xi=xi, nu=hyper$nu, alpha=hyper$alpha,
+                             v=hyper$v, mu0=hyper$mu0, Sig=hyper$Sig)
+          A1 <- A
+          A1[pa,w] <- 1
+          sc <- mvn.score(xi=xi, hyper.par=par, A=A1)
+        }
+        else if(scoring=='g-score'){
+          sc <- g.score(xi=xi, node=w, pa=pa, g=g)
+        }
+        else stop('Unknown scoring')
+      }
+    }
+    lcache[i] <- sc
+  }
+
+  return(lcache)
 }
