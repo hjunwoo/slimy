@@ -21,6 +21,7 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
                       scoring='ml', representation='gm', cache=NULL,
                       progress.bar=FALSE, burn.in=100, map=FALSE,
                       hyper=NULL, q=2, npr=100, nplot=npr, kappa=3,
+                      nprime=1,attrs=NULL,
                       g=1e10, ncores=1){
 
   m <- nrow(xi) # no. of samples
@@ -41,7 +42,7 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
     ac <- parent.sets(nodes=colnames(xi), kappa)
 
   if(discrete)
-    s1 <- sc <- multinom.score(xi=xi, dag=dag)
+    s1 <- sc <- multinom.score(xi=xi, dag=dag, nprime=nprime)
   else{
     if(scoring=='ml') score <- new('GaussL0penObsScore',xi)
     else if(scoring=='bge')
@@ -75,7 +76,7 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
       j <- nbr[k,2]
       if(discrete){
         g1 <- graphAM(adjMat=A1,edgemode='directed')
-        s0 <- multinom.score(xi=xi, dag=g1)/nrow(nbr)
+        s0 <- multinom.score(xi=xi, dag=g1, nprime=nprime)/nrow(nbr)
       }
       else{
         if(scoring=='ml')
@@ -91,7 +92,7 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
           A1 <- A
           A1[j,i] <- 1    # flip the edge
           A1[i,j] <- 0
-          if(!isValidGraph(A1,type='dag')) next
+          if(!is.DAG(A1)) next
         }
         else A1[i,j] <- 0
       }
@@ -99,7 +100,7 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
       nbp <- neighbor(A1)
       if(discrete){
         g1 <- graphAM(adjMat=A1,edgemode='directed')
-        s1 <- multinom.score(xi=xi, dag=g1)/nrow(nbr)
+        s1 <- multinom.score(xi=xi, dag=g1,nprime=nprime)/nrow(nbr)
       }else{
         if(scoring=='ml')
           s1 <- score$local.score(vertex=j,parents=which(A1[,j]!=0))
@@ -184,7 +185,7 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
       if(cnt==npr){
         ddag <- graphAM(adjMat=A,edgemode='directed')
         if(discrete)
-          llk <- multinom.score(xi, dag=ddag)
+          llk <- multinom.score(xi, dag=ddag, nprime=nprime)
         else if(scoring=='ml')
           llk <- score$global.score(as(A,'GaussParDAG'))
         else if(scoring=='bge')
@@ -192,12 +193,18 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
         else if(scoring=='g-score')
           llk <- g.score.global(xi=xi, A=A, g=g, ac=ac, cache=cache)
         else stop('Unknown scoring')
-        cat('istep = ',istep,', log LK = ',llk,', mean distance = ',
+        cat('istep = ',istep,', log LK = ',llk/m/p,', mean distance = ',
             sumd/cnt,'\n',sep='')
         if(istep %% nplot==0){
-          plot(ref, main='True')
-          plot(graphAM(adjMat=A,edgemode='directed'),
-               main=paste0('Distance=',d))
+          if(!is.null(attrs)){
+            plot(ref, main='True',attrs=attrs)
+            plot(graphAM(adjMat=A,edgemode='directed'),
+                 main=paste0('Distance=',d),attrs=attrs)
+          }else{
+            plot(ref, main='True')
+            plot(graphAM(adjMat=A,edgemode='directed'),
+                 main=paste0('Distance=',d))
+          }
         }
         sumd <- cnt <- 0
         if(istep > burn.in){
@@ -228,7 +235,7 @@ neighbor <- function(A){
     if(i==j) next
     Ap <- A
     Ap[i,j] <- 1-A[i,j]
-    if(isValidGraph(Ap,type='dag')) nbr <- rbind(nbr,c(i,j))
+    if(is.DAG(Ap)) nbr <- rbind(nbr,c(i,j))
   }
 
   return(nbr)

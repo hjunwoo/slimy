@@ -78,7 +78,7 @@ h.graph <- function(m, bundle){
 
   Hk <- H
   for(w in W) Hk[,w] <- hac[,grid[m,w]]
-  if(!pcalg::isValidGraph(Hk,type='dag')){
+  if(!is.DAG(Hk)){
     z <- list(Pawgh=NULL, kh=NULL)
     return(z)
   }
@@ -139,7 +139,10 @@ path.count <- function(dag){
 
   nodes <- nodes(dag)
   p <- length(nodes)
-  desc <- edges(dag)
+  desc <- vector('list',p)
+  names(desc) <- nodes
+  A <- as(dag,'matrix')
+  for(i in nodes) desc[[i]] <- c(which(A[i,]!=0)) #descendant list
 
   C <- diag(p)  # path count matrix
   rownames(C) <- colnames(C) <- nodes

@@ -32,11 +32,12 @@ multinom.score <- function(xi, dag, nprime=1){
       cx <- as.character(x)
     else
       cx <- apply(x,1,function(x){paste0(x,collapse=',')})
-    count <- NULL
-    for(m in seq_len(nrow(eg))){
-      ijk <- paste0(eg[m,], collapse=',')
-      count <- c(count,sum(cx==ijk))
-    }
+#   count <- NULL
+#   for(m in seq_len(nrow(eg))){
+#     ijk <- paste0(eg[m,], collapse=',')
+#     count <- c(count,sum(cx==ijk))
+#   }
+    count <- apply(eg,1,function(x){sum(paste0(x,collapse=',')==cx)})
     eg <- cbind(eg,count)
     if(np > 0){
       by <- list()
@@ -62,8 +63,8 @@ multinom.local.score <- function(xi, node, parents, nprime=1){
   p <- length(nodes)
   levels <- vector('list',p)
   names(levels) <- nodes
-  for(i in seq_len(p))
-    levels[[i]] <- levels(factor(xi[,i]))
+  for(w in nodes)
+    levels[[w]] <- levels(factor(xi[,w]))
 
   nsample <- nrow(xi)
 
@@ -72,7 +73,7 @@ multinom.local.score <- function(xi, node, parents, nprime=1){
   tmp <- list()
   for(j in seq_len(np))
     tmp[[j]] <- levels[[parents[j]]]
-  tmp[[np+1]] <- levels[[i]]
+  tmp[[np+1]] <- levels[[node]]
   eg <- expand.grid(tmp)     # enumerated states for (parent,i) set
   colnames(eg) <- nodes
   x <- xi[,nodes]
@@ -80,11 +81,12 @@ multinom.local.score <- function(xi, node, parents, nprime=1){
     cx <- as.character(x)
   else
     cx <- apply(x,1,function(x){paste0(x,collapse=',')})
-  count <- NULL
-  for(m in seq_len(nrow(eg))){
-    ijk <- paste0(eg[m,], collapse=',')
-    count <- c(count,sum(cx==ijk))
-  }
+# count <- NULL
+# for(m in seq_len(nrow(eg))){
+#   ijk <- paste0(eg[m,], collapse=',')
+#   count <- c(count,sum(cx==ijk))
+# }
+  count <- apply(eg,1,function(x){sum(paste0(x,collapse=',')==cx)})
   eg <- cbind(eg,count)
   if(np > 0){
     by <- list()

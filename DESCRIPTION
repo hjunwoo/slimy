@@ -5,8 +5,8 @@ Version: 0.1.0
 Authors: Jun Woo [aut, cre], Sisi Ma [aut]
 Maintainer: Jun Woo <jwoo@umn.edu>
 Depends: R (>= 3.5.0),
-         pcalg,
          graph,
+         igraph,
          gtools,
          Rmpi
 Description: Uses Markov chain Monte Carlo sampling to 

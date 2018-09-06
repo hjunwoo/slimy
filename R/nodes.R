@@ -16,7 +16,7 @@ select_edges <- function(A, xi, q,score,nnodes=1,discrete=FALSE){
     Ak <- A
     for(l in seq_len(q))
       Ak[qpair[l,1],qpair[l,2]] <- x[k,l]
-    if(isValidGraph(Ak,type='dag')){
+    if(is.DAG(Ak)){
       if(discrete){
         dag <- graphAM(adjMat=Ak,edgemode='directed')
         sc <- c(sc, multinom.score(xi=xi, dag=dag))
@@ -60,7 +60,7 @@ select_parents <- function(A, xi, q,ac,score,kappa=3,discrete=FALSE,
     Ak <- A
     for(k in seq_len(q)) Ak[,nodes[k]] <- ac[,grid[m,k]]
     if(sum(diag(Ak)) > 0) sc <- c(sc,NA)
-    else if(!isValidGraph(Ak,type='dag'))
+    else if(!is.DAG(Ak))
       sc <- c(sc, NA)
     else{
       if(discrete){
@@ -178,7 +178,7 @@ fill.cache <- function(iac, bundle){
       A <- matrix(0, nrow=nw, ncol=nw)
       rownames(A) <- colnames(A) <- wpa
       A[pa,w] <- 1
-      if(!pcalg::isValidGraph(A,type='dag')) sc <- NA
+      if(!is.DAG(A)) sc <- NA
       else{
         if(discrete) sc <- multinom.local.score(xi, w, pa)
         else if(scoring=='ml')

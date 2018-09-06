@@ -4,11 +4,28 @@ read.bif <- function(file){
   x <- readLines(file)
   nodes <- c()
   edges <- list()
+  node.levels <- list()
+  p.tmp <- list()
 
-  for(xi in x){
+  nx <- length(x)
+  ix <- 1
+  while(TRUE){
+    xi <- x[[ix]]
     x1 <- strsplit(xi,split=' ')[[1]]
+    x1 <- x1[x1!='']
     if(x1[1]=='variable')
       nodes <- c(nodes,x1[2])
+    else if(x1[1]=='type'){
+      nlevel <- as.numeric(x1[4])
+      factors <- x1[seq(7,7+nlevel-1)]
+      for(i in seq_len(nlevel)){
+        nchar <- nchar(factors[i])
+        if(substr(factors[i],start=nchar,stop=nchar)==',')
+          factors[i] <- substr(factors[i],start=1,stop=nchar-1)
+      }
+      node.levels[[length(nodes)]] <- factors
+      names(node.levels) <- nodes[seq_len(length(nodes))]
+    }
     else if(x1[1]=='probability'){
       progeny <- x1[3]
       x2 <- strsplit(xi,split='[|]')[[1]][2]
@@ -16,24 +33,80 @@ read.bif <- function(file){
       parents <- strsplit(x3,split='[,]')[[1]]
       parents <- vapply(parents,function(x){gsub(' ','',x,fixed=TRUE)},
                         character(1))
-      for(p in parents){
-        if(is.na(p)) next
-        if(p %in% names(edges))
-          edges[[p]]$edges <- c(edges[[p]]$edges,progeny)
-        else{
-          edges[[length(edges)+1]] <- list(edges=progeny)
-          names(edges)[length(edges)] <- p
+      if(sum(is.na(parents))==0){
+        idx <- list()
+        i <- 1
+        for(p in parents){
+          if(is.na(p)) next
+          if(p %in% names(edges))
+            edges[[p]]$edges <- c(edges[[p]]$edges,progeny)
+          else{
+            edges[[length(edges)+1]] <- list(edges=progeny)
+            names(edges)[length(edges)] <- p
+          }
+          idx[[i]] <- node.levels[[p]]
+          i <- i+1
         }
+        grid <- expand.grid(idx)
+        npa <- length(parents)
+        names(grid) <- parents
+        if(npa > 1){
+          idx <- match(parents,nodes)
+          grid <- grid[,order(idx)]
+        }
+
+        if(npa > 1)
+          na <- apply(grid,1,function(x){y <- paste0(x,collapse=',');
+                                     paste0('(',y,')')})
+        else na <- grid[,1]
+        for(k in seq_len(nrow(grid))){
+          ix <- ix + 1
+          xi <- x[[ix]]
+          x1 <- strsplit(xi,split=')')[[1]]
+          y <- strsplit(x1[-1],split=' ')[[1]]
+          y <- y[y!='']
+          x1 <- gsub(';','',y)
+          x1 <- gsub(',','',x1)
+          x1 <- as.numeric(x1)
+          if(k==1) prob <- matrix(x1, nrow=1)
+          else prob <- rbind(prob, matrix(x1, nrow=1))
+        }
+        rownames(prob) <- na
+        gprob <- cbind(grid,prob)
+#       if(progeny=='VENTLUNG') browser()
+
+        p.tmp[[length(p.tmp)+1]] <- gprob[,seq(npa+1,ncol(gprob))]
+        names(p.tmp)[length(p.tmp)] <- progeny
+      }
+      else{
+        ix <- ix + 1
+        xi <- x[[ix]]
+        y <- strsplit(xi,split=' ')[[1]]
+        y <- y[y!=''][-1]
+        x1 <- gsub(';','',y)
+        x1 <- gsub(',','',x1)
+        prob  <- matrix(as.numeric(x1),nrow=1)
+        p.tmp[[length(p.tmp)+1]] <- prob
+        names(p.tmp)[length(p.tmp)] <- progeny
       }
     }
+    ix <- ix + 1
+    if(ix > nx) break
   }
+  names(node.levels) <- nodes
   for(v in nodes){
     if(!(v %in% names(edges))){
       edges[[length(edges)+1]] <- list(edges=NULL)
       names(edges)[length(edges)] <- v
     }
   }
-  g <- graphNEL(nodes=nodes, edgeL=edges, edgemode='directed')
+  g <- graph::graphNEL(nodes=nodes, edgeL=edges, edgemode='directed')
+  A <- as(g,'matrix')
+  g <- graph::graphAM(adjMat=A, edgemode='directed')
+  p.tmp <- p.tmp[match(nodes,names(p.tmp))]
+  g@edgeData@data <- p.tmp
+  g@nodeData@data <- node.levels
+
   return(g)
 }
 
@@ -102,7 +175,7 @@ rgraph <- function(dag=NULL, nodes=NULL, mean.degree=1, max.degree=Inf,
         m <- sample(x=nodes[-k],size=L,replace=FALSE)
         A1[m,k] <- 1
       }
-      if(isValidGraph(A1,type='dag')) break
+      if(is.DAG(A1)) break
     }
   }
   prob <- vector('list',p)
@@ -180,8 +253,9 @@ hfunc <- function(x, i, parents, par, levels, sd=1){
   np <- length(parents[[i]])
   values <- levels[[i]]
   discrete <- !is.null(values)
+  pari <- par[[nodes[i]]]
   if(np==0){    # a root node
-    if(discrete) prob <- par[[i]][1,]
+    if(discrete) prob <- pari[1,]
     else xm <- 0
   }
   else{
@@ -194,20 +268,20 @@ hfunc <- function(x, i, parents, par, levels, sd=1){
     if(discrete){
       irow <- paste0(v,collapse=',')
       if(np > 1) irow <- paste0('(',irow,')',collapse='')
-      prob <- par[[i]][irow,]
+#     if(np > 2) browser()
+      prob <- pari[irow,]
     }
     else{
       xm <- 0
       for(xp in parents[[i]])
-        xm <- xm + par[[i]][xp]*v[xp]
+        xm <- xm + pari[xp]*v[xp]
     }
   }
   if(discrete)
     ix <- sample(x=values, size=1, prob=prob)
-  else{
+  else
     ix <- rnorm(n=1, mean=xm, sd=sd)
-    names(ix) <- nodes[i]
-  }
+  names(ix) <- nodes[i]
 
   x <- c(x,ix)
   return(x)
@@ -240,4 +314,23 @@ simulate.gauss <- function(dag, nsample){
   xi <- r$simulate(nsample)
 
   return(xi)
+}
+
+#' Check if graph is DAG
+#' @export
+#'
+is.DAG <- function(obj){
+
+  if(class(obj)=='graphAM')
+    obj <- as(obj,'matrix')
+  else if(class(obj)=='data.frame')
+    obj <- as.matrix(obj)
+
+  if(class(obj)!='matrix') stop('Wrong object class in is.DAG')
+
+  g <- igraph::graph_from_adjacency_matrix(obj)
+  flag <- is_dag(g)
+
+  return(flag)
+
 }
