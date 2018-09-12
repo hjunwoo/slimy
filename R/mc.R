@@ -17,13 +17,14 @@
 #' @export
 mc.sample <- function(xi, dag=NULL, ref=NULL,
                       discrete=FALSE,
-                      nstep=1000, Big=100, verbose=3, method='gibbs',
-                      scoring='ml', representation='gm', cache=NULL,
+                      nstep=1000, verbose=3, scoring='ml', cache=NULL,
                       progress.bar=FALSE, burn.in=100, map=FALSE,
                       hyper=NULL, q=2, npr=100, nplot=npr, kappa=3,
                       nprime=1,attrs=NULL,
-                      g=1e10, ncores=1){
+                      g=1e10, ncores=1, useC=FALSE){
 
+  if(burn.in >= nstep) burn.in <- nstep-1
+  Big <- 100    # exp(-x)=0 for x > Big
   m <- nrow(xi) # no. of samples
   p <- ncol(xi) # no. of nodes
   nodes <- colnames(xi)
@@ -38,143 +39,56 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
   sumd <- 0
   cnt <- 0
 
-  if(method=='gibbs')
-    ac <- parent.sets(nodes=colnames(xi), kappa)
+  ac <- parent.sets(nodes=colnames(xi), kappa)
 
-  if(discrete)
-    s1 <- sc <- multinom.score(xi=xi, dag=dag, nprime=nprime)
-  else{
-    if(scoring=='ml') score <- new('GaussL0penObsScore',xi)
-    else if(scoring=='bge')
-      s1 <- sc <- mvn.score(xi=xi, hyper=hyper, A=A)
-    else if(scoring=='g-score')
-      s1 <- sc <- g.score.global(xi=xi, A=A, g=g, ac=ac, cache=cache)
-    else stop('Unknown scoring.')
-  }
-
-  if(method=='gibbs' & representation=='gm'){
-    if(is.null(cache))
-      cache <- local.score(xi=xi, ac=ac, kappa=kappa,
+  if(is.null(cache))
+    cache <- local.score(xi=xi, ac=ac, kappa=kappa,
                              discrete=discrete, scoring=scoring,
                              score=score, hyper=hyper, g=g,
                              progress.bar=progress.bar, ncores=ncores)
-    path <- path.count(dag=dag)$C
-  }
+  path <- path.count(dag=dag)$C
 
   istep <- iburned <- 0
   edge.prob <- matrix(0, nrow=p, ncol=p)   # edge.probability
   rownames(edge.prob) <- colnames(edge.prob) <- nodes
   Map <- NULL   # MAP graph and its score
+  Elm <- NULL   # Mean log lkh
 
   while(TRUE){
 
-    if(method=='metropolis'){
-      nbr <- neighbor(A)
-      k <- floor(runif(n=1)*nrow(nbr))+1
-      A1 <- A
-      i <- nbr[k,1]
-      j <- nbr[k,2]
-      if(discrete){
-        g1 <- graphAM(adjMat=A1,edgemode='directed')
-        s0 <- multinom.score(xi=xi, dag=g1, nprime=nprime)/nrow(nbr)
-      }
-      else{
-        if(scoring=='ml')
-          s0 <- score$local.score(vertex=j,parents=which(A1[j]!=0))/nrow(nbr)
-        else if(scoring=='bge')
-          s0 <- mvn.score(xi=xi, hyper=hyper, A=A1)/nrow(nbr)
-        else if(scoring=='g-score')
-          s0 <- g.score.global(xi=xi, A=A, g=g, ac=ac, cache=cache)
-        else stop('Unknown scoring')
-      }
-      if(A1[i,j]==1){
-        if(runif(n=1)>0.5){
-          A1 <- A
-          A1[j,i] <- 1    # flip the edge
-          A1[i,j] <- 0
-          if(!is.DAG(A1)) next
-        }
-        else A1[i,j] <- 0
-      }
-      else A1[i,j] <- 1
-      nbp <- neighbor(A1)
-      if(discrete){
-        g1 <- graphAM(adjMat=A1,edgemode='directed')
-        s1 <- multinom.score(xi=xi, dag=g1,nprime=nprime)/nrow(nbr)
-      }else{
-        if(scoring=='ml')
-          s1 <- score$local.score(vertex=j,parents=which(A1[,j]!=0))
-        else
-          s1 <- mvn.score(xi=xi, hyper=hyper, A=A1)
-      }
-      s1 <- s1/nrow(nbp)
-      accept <- FALSE
-      if(s1>s0) accept <- TRUE
-      else{
-        e <- exp(s1-s0)
-        if(runif(n=1)<e) accept <- TRUE
-      }
-      if(accept) A <- A1
-      else s1 <- s0
-      if(nrow(nbp)>0) istep <- istep + 1
-    }
-    else if(method=='gibbs'){
-      if(representation=='edge.set'){
-        qtable <- select_edges(A=A, xi=xi, q=q, score=score,
-                               discrete=discrete)
-        if(is.null(qtable$score)) next
-        iq <- sample(nrow(qtable$score), size=1, prob=qtable$score[,q+1])
-        for(l in seq_len(q)){
-          i <- qtable$index[l,1]
-          j <- qtable$index[l,2]
-          A[i,j] <- qtable$score[iq,l]
-        }
-      }
-      else if(representation=='parent.set'){
-        Ak <- select_parents(A=A, xi=xi, q=q, ac=ac, score=score,
-                             discrete=discrete,
-                             kappa=kappa, verbose=verbose,
-                             progress.bar=progress.bar)
-        if(is.na(Ak$flag)) next
-        A <- Ak$Ak
-      }
-      else if(representation=='gm'){    # goudie-mukherjee
-
-        Pawgh <- partition.pset(A=A, xi=xi, q=q, ac=ac, path=path,
+    Pawgh <- partition.pset(A=A, xi=xi, q=q, ac=ac, path=path,
                       kappa=kappa,cache=cache, progress.bar=progress.bar,
-                      ncores=ncores)
-        nh <- length(Pawgh$PaH)
-        prob <- exp(Pawgh$KH)
-        prob <- prob/sum(prob)
-        h <- sample(seq_len(nh), size=1, prob=prob)  # Parition index
+                      ncores=ncores, useC=useC)
+    nh <- length(Pawgh$PaH)
+    prob <- exp(Pawgh$KH)
+    prob <- prob/sum(prob)
+    h <- sample(seq_len(nh), size=1, prob=prob)  # Parition index
 
-        pah <- Pawgh$PaH[[h]]
-        W <- names(pah)
-        aw <- A
-        A1 <- A
-        A1[,W] <- 0
-        for(w in W){
-          prob <- NULL
-          np <- length(pah[[w]])
-          paw <- list()
-          for(j in seq_len(np)){
-            pa <- pah[[w]][j]
-            paw[[j]] <- nodes[which(ac[,pa]==1)]
-            sc <- cache[w,pa]
-            prob <- c(prob,sc)
-          }
-          prob <- prob-max(prob)
-          prob <- exp(prob)
-          prob <- prob/sum(prob)
-          hi <- sample(np, size=1,prob=prob)
-          A1[paw[[hi]],w] <- 1
-        }
-        path <- path.update(A0=A, A1=A1, path)
-        A <- A1
+    pah <- Pawgh$PaH[[h]]
+    W <- names(pah)
+    aw <- A
+    A1 <- A
+    A1[,W] <- 0
+    for(w in W){
+      prob <- NULL
+      np <- length(pah[[w]])
+      paw <- list()
+      for(j in seq_len(np)){
+        pa <- pah[[w]][j]
+        paw[[j]] <- nodes[which(ac[,pa]==1)]
+        sc <- cache[w,pa]
+        prob <- c(prob,sc)
       }
-      istep <- istep + 1
+      prob <- prob-max(prob)
+      prob <- exp(prob)
+      prob <- prob/sum(prob)
+      hi <- sample(np, size=1,prob=prob)
+      A1[paw[[hi]],w] <- 1
     }
-    else stop('Unknown method')
+    path <- path.update(A0=A, A1=A1, path)
+    A <- A1
+
+    istep <- istep + 1
 
     if(verbose>=2){
       if(!is.null(ref)){
@@ -184,15 +98,21 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
       }
       if(cnt==npr){
         ddag <- graphAM(adjMat=A,edgemode='directed')
-        if(discrete)
-          llk <- multinom.score(xi, dag=ddag, nprime=nprime)
+        if(discrete){
+          if(is.null(cache))
+            llk <- multinom.score(xi, dag=ddag, scoring=scoring,
+                                nprime=nprime)
+          else
+            llk <- multinom.cache.score(dag=ddag, ac, cache)
+        }
         else if(scoring=='ml')
           llk <- score$global.score(as(A,'GaussParDAG'))
         else if(scoring=='bge')
           llk <- mvn.score(xi=xi, hyper=hyper, A=A)
-        else if(scoring=='g-score')
+        else if(scoring=='g')
           llk <- g.score.global(xi=xi, A=A, g=g, ac=ac, cache=cache)
         else stop('Unknown scoring')
+
         cat('istep = ',istep,', log LK = ',llk/m/p,', mean distance = ',
             sumd/cnt,'\n',sep='')
         if(istep %% nplot==0){
@@ -214,6 +134,7 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
             Map <- list(dag=ddag, score=llk)
           else if(llk > Map$score)
             Map <- list(dag=ddag, score=llk)
+          Elm <- c(Elm, llk)
         }
       }
     }
@@ -222,7 +143,8 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
   colnames(A) <- colnames(xi)
   dag <- graphAM(adjMat=A, edgemode='directed')
   edge.prob <- edge.prob/iburned
-  z <- list(dag=dag, map=Map, edge.prob=edge.prob)
+  Elm <- mean(Elm)/m/p
+  z <- list(dag=dag, map=Map, edge.prob=edge.prob, elm=Elm)
 
   return(z)
 }
@@ -230,12 +152,15 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
 neighbor <- function(A){
 
   p <- nrow(A)
-  nbr <- NULL
+  nbr <- c(0,0)
   for(i in seq(1,p)) for(j in seq(1,p)){
     if(i==j) next
-    Ap <- A
-    Ap[i,j] <- 1-A[i,j]
-    if(is.DAG(Ap)) nbr <- rbind(nbr,c(i,j))
+    if(A[i,j]==0){
+      Ap <- A
+      Ap[i,j] <- 1
+      if(!is.DAG(Ap)) next
+    }
+    nbr <- rbind(nbr,c(i,j))
   }
 
   return(nbr)
@@ -245,7 +170,7 @@ neighbor <- function(A){
 #' @export
 
 compute.score <- function(xi, kappa=3, discrete=FALSE, scoring='ml',
-                          hyper=NULL, g=NULL, progress.bar=TRUE,
+                          hyper=NULL, g=1e10, progress.bar=TRUE,nprime=1,
                           ncores=1){
 
   ac <- parent.sets(nodes=colnames(xi), kappa)
@@ -265,6 +190,7 @@ compute.score <- function(xi, kappa=3, discrete=FALSE, scoring='ml',
 
   cache <- local.score(xi=xi, ac=ac, kappa=kappa, discrete=discrete,
                        scoring=scoring, score=score, g=g, hyper=hyper,
+                       nprime=nprime,
                        progress.bar=progress.bar, ncores=ncores)
 
   return(cache)

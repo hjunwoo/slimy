@@ -3,18 +3,17 @@
 #' @param dag Graph object of class \code{graphAM}
 #' @param nprime Prior count
 #' @export
-multinom.score <- function(xi, dag, nprime=1){
+multinom.score <- function(xi, dag, scoring='K2', nprime=1){
+
+  if(scoring=='K2') nprime <- 1
 
   p <- ncol(xi)
   nodes <- nodes(dag)
   plist <- inEdges(dag)
-  levels <- dag@nodeData@data
-  if(length(levels)==0){
-    levels <- vector('list',p)
-    names(levels) <- nodes
-    for(i in seq_len(p))
-      levels[[i]] <- levels(factor(xi[,i]))
-  }
+  levels <- vector('list',p)
+  names(levels) <- nodes
+  for(i in seq_len(p))
+    levels[[i]] <- levels(factor(xi[,i]))
   nsample <- nrow(xi)
 
   score <- 0
@@ -32,11 +31,6 @@ multinom.score <- function(xi, dag, nprime=1){
       cx <- as.character(x)
     else
       cx <- apply(x,1,function(x){paste0(x,collapse=',')})
-#   count <- NULL
-#   for(m in seq_len(nrow(eg))){
-#     ijk <- paste0(eg[m,], collapse=',')
-#     count <- c(count,sum(cx==ijk))
-#   }
     count <- apply(eg,1,function(x){sum(paste0(x,collapse=',')==cx)})
     eg <- cbind(eg,count)
     if(np > 0){
@@ -47,8 +41,14 @@ multinom.score <- function(xi, dag, nprime=1){
       egsc <- egs$count
     }
     else egsc <- sum(eg$count)
-    sc <- sum(lgamma(nprime+eg$count)-lgamma(nprime))
-    npij <- nprime*nrow(eg)
+
+    nijk <- nprime
+    if(scoring=='BDeu'){
+      nijk <- nijk/length(levels[[nodes[i]]])
+      if(np > 0) nijk <- nijk/np
+    }
+    sc <- sum(lgamma(nijk + eg$count)-lgamma(nijk))
+    npij <- nijk*nrow(eg)
     sc <- sc + sum(lgamma(npij)-lgamma(npij+egsc))
 
     score <- score + sc
@@ -57,7 +57,10 @@ multinom.score <- function(xi, dag, nprime=1){
   return(score)
 }
 
-multinom.local.score <- function(xi, node, parents, nprime=1){
+multinom.local.score <- function(xi, node, parents, scoring='K2',
+                                 hyper=NULL, nprime=1){
+
+  if(scoring=='K2') nprime <- 1
 
   nodes <- c(parents,node)
   p <- length(nodes)
@@ -81,11 +84,6 @@ multinom.local.score <- function(xi, node, parents, nprime=1){
     cx <- as.character(x)
   else
     cx <- apply(x,1,function(x){paste0(x,collapse=',')})
-# count <- NULL
-# for(m in seq_len(nrow(eg))){
-#   ijk <- paste0(eg[m,], collapse=',')
-#   count <- c(count,sum(cx==ijk))
-# }
   count <- apply(eg,1,function(x){sum(paste0(x,collapse=',')==cx)})
   eg <- cbind(eg,count)
   if(np > 0){
@@ -96,10 +94,33 @@ multinom.local.score <- function(xi, node, parents, nprime=1){
     egsc <- egs$count
   }
   else egsc <- sum(eg$count)
-  sc <- sum(lgamma(nprime+eg$count)-lgamma(nprime))
-  npij <- nprime*nrow(eg)
-  sc <- sc + sum(lgamma(npij)-lgamma(npij+egsc))
-  score <- score + sc
 
-  return(score)
+  nijk <- nprime
+  if(scoring=='BDeu'){
+    nijk <- nijk/length(levels[[node]])
+    if(np > 0) nijk <- nijk/np
+  }
+  sc <- sum(lgamma(nijk + eg$count)-lgamma(nijk))
+  npij <- nijk*nrow(eg)
+  sc <- sc + sum(lgamma(npij)-lgamma(npij+egsc))
+
+  return(sc)
+}
+
+multinom.cache.score <- function(dag, ac, cache){
+
+  e <- 0
+  nodes <- nodes(dag)
+  parents <- inEdges(dag)
+  for(w in nodes){
+    pa <- parents[[w]]
+    npa <- length(pa)
+    ipa <- nodes %in% pa
+    if(npa>0)
+      iac <- which(apply(ac,2,function(x){all(x==ipa)}))
+    else
+      iac <- 1
+    e <- e + cache[w,iac]
+  }
+  return(e)
 }

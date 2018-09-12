@@ -1,4 +1,4 @@
-#' compute the g-score
+#' compute the g-prior score
 #' @export
 g.score <- function(xi, node, pa, g){
 

@@ -73,7 +73,6 @@ read.bif <- function(file){
         }
         rownames(prob) <- na
         gprob <- cbind(grid,prob)
-#       if(progeny=='VENTLUNG') browser()
 
         p.tmp[[length(p.tmp)+1]] <- gprob[,seq(npa+1,ncol(gprob))]
         names(p.tmp)[length(p.tmp)] <- progeny
@@ -113,17 +112,49 @@ read.bif <- function(file){
 #' @export
 distance <- function(m, mref, equivalence=TRUE){
 
-  if(nrow(m)!=nrow(mref) | ncol(m)!=ncol(mref)) stop('distance error')
+  if(class(m)!='matrix') m <- as(m,'matrix')
+  if(class(mref)!='matrix') mref <- as(mref,'matrix')
+  if(nrow(m)!=nrow(mref) | ncol(m)!=ncol(mref))
+    stop('distance error')
 
   if(equivalence){
-    m <- m + t(m)
-    mref <- mref + t(mref)
+#   m <- m + t(m)
+#   mref <- mref + t(mref)
+    m <- m | t(m)            #  could be bidirectional
+    mref <- mref | t(mref)
     x <- m!=mref
     d <- sum(x[upper.tri(x)])
   }
   else d <- sum(m!=mref)
 
   return(d)
+}
+
+#' sensitivity and specificity of adjacency matrix with respect to ref
+#' @export
+senspec <- function(m, mref, equivalence=TRUE){
+
+  if(class(m)!='matrix') m <- as(m,'matrix')
+  if(class(mref)!='matrix') mref <- as(mref,'matrix')
+  if(nrow(m)!=nrow(mref) | ncol(m)!=ncol(mref)) stop('distance error')
+
+  if(equivalence){
+#   m <- m + t(m)
+#   mref <- mref + t(mref)
+    m <- m | t(m)
+    mref <- mref | t(mref)
+    x <- m[upper.tri(m)]
+    xref <- mref[upper.tri(mref)]
+  }
+  else{
+    x <- m
+    xref <- mref
+  }
+  tpr <- sum(x[xref==1])/sum(xref==1)
+  tnr <- sum(x[xref==0]==0)/sum(xref==0)
+
+  z <- list(sens=tpr,spec=tnr)
+  return(z)
 }
 
 mat2nel <- function(nodes, A){
@@ -188,9 +219,10 @@ rgraph <- function(dag=NULL, nodes=NULL, mean.degree=1, max.degree=Inf,
     np <- sum(A1[,k]!=0)
     if(discrete){
       if(np==0)
-        prob[[k]] <- rdirichlet(n=1,alpha=alpha)  # marginal distribution
+        prob[[k]] <- gtools::rdirichlet(n=1,alpha=alpha)
+                              # marginal distribution
       else{
-        prob[[k]] <- rdirichlet(n=nlevels^np, alpha=alpha)
+        prob[[k]] <- gtools::rdirichlet(n=nlevels^np, alpha=alpha)
       }
     }
     else if(np >0)
@@ -222,7 +254,7 @@ rgraph <- function(dag=NULL, nodes=NULL, mean.degree=1, max.degree=Inf,
 
 #' Generate simulated data for discrete graph
 #' @export
-simulate.data <- function(dag, nsample, sd=1.0){
+simulate.data <- function(dag, nsample, sd=1.0, progress.bar=FALSE){
 
   nodes <- nodes(dag)
   parents <- inEdges(dag)
@@ -231,6 +263,7 @@ simulate.data <- function(dag, nsample, sd=1.0){
   levels <- dag@nodeData@data
 
   xi <- NULL
+  if(progress.bar) pb <- txtProgressBar(style=3)
   for(k in seq_len(nsample)){
     x <- NULL
     for(i in seq_len(p)){
@@ -239,7 +272,9 @@ simulate.data <- function(dag, nsample, sd=1.0){
     }
     x <- x[match(nodes,names(x))]
     xi <- rbind(xi,x)
+    if(progress.bar) setTxtProgressBar(pb, value=k/nsample)
   }
+  if(progress.bar) close(pb)
   xi <- as.data.frame(xi)
   rownames(xi) <- seq_len(nsample)
   colnames(xi) <- nodes
@@ -268,7 +303,6 @@ hfunc <- function(x, i, parents, par, levels, sd=1){
     if(discrete){
       irow <- paste0(v,collapse=',')
       if(np > 1) irow <- paste0('(',irow,')',collapse='')
-#     if(np > 2) browser()
       prob <- pari[irow,]
     }
     else{
@@ -329,8 +363,34 @@ is.DAG <- function(obj){
   if(class(obj)!='matrix') stop('Wrong object class in is.DAG')
 
   g <- igraph::graph_from_adjacency_matrix(obj)
-  flag <- is_dag(g)
+  flag <- igraph::is_dag(g)
 
   return(flag)
 
+}
+
+#' Graph from posterior edge probability
+#' @export
+
+posterior.graph <- function(edge.prob, cut=0.5){
+
+  nodes <- rownames(edge.prob)
+  A <- apply(edge.prob,1:2,function(x){x>=0.5})
+  g <- graphAM(adjMat=A,edgemode='directed')
+
+  return(g)
+}
+
+#' ROC
+#' @export
+roc.graph <- function(edge.prob, mref){
+
+  if(class(mref)!='matrix') mref <- as(mref,'matrix')
+  a <- edge.prob + t(edge.prob)
+  mref <- mref + t(mref)
+  x <- a[upper.tri(a)]
+  xref <- mref[upper.tri(mref)]
+  roc <- pROC::roc(response=xref,predictor=x)
+
+  return(roc)
 }

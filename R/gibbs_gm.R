@@ -1,7 +1,7 @@
 # Partition parent sets using GM algorithm
 #
 partition.pset <- function(A, xi, q, ac, path, kappa=3, cache,
-                           progress.bar=FALSE, ncores=1){
+                           progress.bar=FALSE, ncores=1, useC=FALSE){
 
   p <- nrow(A)
   nodes <- rownames(A)
@@ -30,28 +30,31 @@ partition.pset <- function(A, xi, q, ac, path, kappa=3, cache,
   idx <- list()
   for(k in seq_len(q)) idx[[k]] <- seq_len(nset)
   grid <- expand.grid(idx)
+  grid <- as.matrix(grid)
   colnames(grid) <- W
 
   ngrid <- nrow(grid)
+  dagid <- c()
+  for(i in seq_len(ngrid)){     # identify dags from list
+    Hk <- H
+    for(w in W) Hk[,w] <- hac[,grid[i,w]]
+    if(is.DAG(Hk))
+      dagid <- c(dagid,i)
+  }
+
   bundle <- list(W=W, H=H, hac=hac, dew=dew, ndw=ndw, nd=nd, ac=ac,
                  nodes=nodes, cache=cache, grid=grid, q=q)
   if(ncores==1)
-    hgraph <- lapply(seq_len(ngrid), FUN=h.graph, bundle)
+    hgraph <- lapply(dagid, FUN=h.graph, bundle)
   else{
-#   Rmpi::mpi.spawn.Rslaves(nslaves=ncores)
-#   Rmpi::mpi.bcast.cmd(library(slimy))
     Rmpi::mpi.bcast.Robj2slave(bundle)
-    hgraph <- Rmpi::mpi.applyLB(seq_len(ngrid), FUN=h.graph, bundle)
-#   Rmpi::mpi.close.Rslaves()
-#   Rmpi::mpi.finalize()
+    hgraph <- Rmpi::mpi.applyLB(dagid, FUN=h.graph, bundle)
   }
 
   Pawgh <- list()   # list of parent sets of w partitioned into H
   eta <- 0          # partition count
   KH <- NULL
-  for(m in seq_len(ngrid)){
-    z <- hgraph[[m]]
-    if(is.null(z$Pawgh)) next  # not a valid DAG
+  for(z in hgraph){
     eta <- eta + 1
     Pawgh[[eta]] <- z$Pawgh
     KH <- c(KH, z$kh)
@@ -78,10 +81,6 @@ h.graph <- function(m, bundle){
 
   Hk <- H
   for(w in W) Hk[,w] <- hac[,grid[m,w]]
-  if(!is.DAG(Hk)){
-    z <- list(Pawgh=NULL, kh=NULL)
-    return(z)
-  }
 
   Pawgh <- vector('list', q)
   names(Pawgh) <- W
@@ -142,7 +141,7 @@ path.count <- function(dag){
   desc <- vector('list',p)
   names(desc) <- nodes
   A <- as(dag,'matrix')
-  for(i in nodes) desc[[i]] <- c(which(A[i,]!=0)) #descendant list
+  for(i in nodes) desc[[i]] <- nodes[which(A[i,]!=0)]  #descendant list
 
   C <- diag(p)  # path count matrix
   rownames(C) <- colnames(C) <- nodes

@@ -1,4 +1,5 @@
-select_edges <- function(A, xi, q,score,nnodes=1,discrete=FALSE){
+select_edges <- function(A, xi, q,score,scoring='K2',nprime=1,
+                         nnodes=1,discrete=FALSE){
 
   qpair <- NULL
   p <- nrow(A)
@@ -19,7 +20,8 @@ select_edges <- function(A, xi, q,score,nnodes=1,discrete=FALSE){
     if(is.DAG(Ak)){
       if(discrete){
         dag <- graphAM(adjMat=Ak,edgemode='directed')
-        sc <- c(sc, multinom.score(xi=xi, dag=dag))
+        sc <- c(sc, multinom.score(xi=xi, dag=dag,
+                                   scoring=scoring,nprime=nprime))
       }
       else{
         dag <- as(Ak,'GaussParDAG')
@@ -65,7 +67,8 @@ select_parents <- function(A, xi, q,ac,score,kappa=3,discrete=FALSE,
     else{
       if(discrete){
         dag <- graphAM(adjMat=Ak,edgemode='directed')
-        sc <- c(sc, multinom.score(xi=xi, dag=dag))
+        sc <- c(sc, multinom.score(xi=xi, dag=dag,scoring=scoring,
+                                   nprime=nprime))
       }
       else{
         dag <- as(Ak,'GaussParDAG')
@@ -117,7 +120,7 @@ parent.sets <- function(nodes, kappa=3){
 # computes local score conditional to all possible parent sets for each node
 
 local.score <- function(xi, ac, kappa, discrete=TRUE, scoring='ml',
-                        score=NULL, g=NULL,
+                        score=NULL, g=NULL, nprime=1,
                         hyper=NULL, progress.bar=FALSE, ncores=1){
 
   nodes <- colnames(xi)
@@ -128,7 +131,7 @@ local.score <- function(xi, ac, kappa, discrete=TRUE, scoring='ml',
   cat('Computing local scores ...\n')
 
   bundle <- list(xi=xi, ac=ac, hyper=hyper, discrete=discrete,
-                 scoring=scoring, g=g)  # parameter set
+                 scoring=scoring, g=g, nprime=nprime)  # parameter set
 
   nac <- ncol(ac)  # no. of parent sets
   if(ncores==1){
@@ -141,12 +144,8 @@ local.score <- function(xi, ac, kappa, discrete=TRUE, scoring='ml',
     if(progress.bar) close(pb)
   }
   else{            # parallel
-#   Rmpi::mpi.spawn.Rslaves(nslaves=ncores)
-#   Rmpi::mpi.bcast.cmd(library(slimy))    # these are done outside
     Rmpi::mpi.bcast.Robj2slave(bundle)
     lcache <- Rmpi::mpi.applyLB(seq_len(nac), FUN=fill.cache, bundle)
-#   Rmpi::mpi.close.Rslaves()
-#   Rmpi::mpi.finalize()   # appears necessary for clean-up
   }
 
   for(iac in seq_len(nac))
@@ -163,6 +162,7 @@ fill.cache <- function(iac, bundle){
   discrete <- bundle$discrete
   scoring <- bundle$scoring
   g <- bundle$g
+  nprime <- bundle$nprime
 
   nodes <- colnames(xi)
   p <- length(nodes)
@@ -175,12 +175,14 @@ fill.cache <- function(iac, bundle){
     else{
       wpa <- nodes[nodes %in% c(w,pa)]
       nw <- length(wpa)
-      A <- matrix(0, nrow=nw, ncol=nw)
+      A <-  matrix(0, nrow=nw, ncol=nw)
       rownames(A) <- colnames(A) <- wpa
       A[pa,w] <- 1
       if(!is.DAG(A)) sc <- NA
       else{
-        if(discrete) sc <- multinom.local.score(xi, w, pa)
+        if(discrete) sc <-
+            multinom.local.score(xi, w, pa,scoring=scoring,
+                                 hyper=hyper, nprime=nprime)
         else if(scoring=='ml')
           sc <- score$local.score(vertex=which(w==nodes),
                                        parents=match(pa,nodes))
@@ -191,7 +193,7 @@ fill.cache <- function(iac, bundle){
           A1[pa,w] <- 1
           sc <- mvn.score(xi=xi, hyper.par=par, A=A1)
         }
-        else if(scoring=='g-score'){
+        else if(scoring=='g'){
           sc <- g.score(xi=xi, node=w, pa=pa, g=g)
         }
         else stop('Unknown scoring')
