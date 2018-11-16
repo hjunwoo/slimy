@@ -5,9 +5,9 @@ partition.pset <- function(A, xi, q, ac, path, kappa=3, cache,
 
   p <- nrow(A)
   nodes <- rownames(A)
-  W <- sample(nodes, size=q)
   Ag <- A
   Cgbar <- path
+  W <- sample(nodes,size=q)
   for(w in W)
     for(k in nodes[which(Ag[,w]>0)])   # remove edge k -> w
       Cgbar <- Cgbar - outer(Cgbar[,k],Cgbar[w,],'*')

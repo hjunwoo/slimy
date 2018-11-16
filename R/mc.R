@@ -15,34 +15,53 @@
 #' @param kappa Maximum in-degree per node assumed
 #' @param burn.in Initial periods to throw away before collecting statistics
 #' @export
-mc.sample <- function(xi, dag=NULL, ref=NULL,
+mc.sample <- function(ci=NULL, xi=NULL, dag=NULL, ref=NULL,
                       discrete=FALSE,
                       nstep=1000, verbose=3, scoring='ml', cache=NULL,
                       progress.bar=FALSE, burn.in=100, map=FALSE,
                       hyper=NULL, q=2, npr=100, nplot=npr, kappa=3,
-                      nprime=1,attrs=NULL,
+                      nprime=1,attrs=NULL, init.deg=2, frq.update=1,
                       g=1e10, ncores=1, useC=FALSE){
 
   if(burn.in >= nstep) burn.in <- nstep-1
   Big <- 100    # exp(-x)=0 for x > Big
-  m <- nrow(xi) # no. of samples
-  p <- ncol(xi) # no. of nodes
-  nodes <- colnames(xi)
+  if(is.null(ci)){
+    m <- nrow(xi) # no. of samples
+    p <- ncol(xi) # no. of nodes
+    nodes <- colnames(xi)
+  }
+  else{
+    m <- nrow(ci)
+    p <- ncol(ci)
+    nodes <- colnames(ci)
+  }
 
-  if(is.null(dag))
-      dag <- rgraph(nodes=nodes,discrete=discrete,mean.degree=0.1,
+
+  if(scoring=='pois'){
+    po <- pois_stat(yi=ci)
+    const <- sum(lfactorial(ci))
+  }
+
+  if(is.null(dag))   # initial graph
+    dag <- rgraph(nodes=nodes,discrete=discrete,mean.degree=init.deg,
                     max.degree=kappa)
   A <- as(dag,'matrix')
   A <- apply(A,1:2,as.numeric)
-  colnames(A) <- colnames(xi)
+  colnames(A) <- nodes
 
   sumd <- 0
   cnt <- 0
 
-  ac <- parent.sets(nodes=colnames(xi), kappa)
+  ac <- parent.sets(nodes=nodes, kappa)
 
-  if(is.null(cache))
-    cache <- local.score(xi=xi, ac=ac, kappa=kappa,
+  if(scoring=='pois'){
+#    xi <- rnorm(n=p)   # initial field
+#    names(xi) <- nodes
+    xi <- matrix(rnorm(n=p*nsample),nrow=nsample,ncol=p)
+    colnames(xi) <- nodes
+  }
+  else if(is.null(cache))
+    cache <- local.score(ci=ci, xi=xi, ac=ac, kappa=kappa,
                              discrete=discrete, scoring=scoring,
                              score=score, hyper=hyper, g=g,
                              progress.bar=progress.bar, ncores=ncores)
@@ -56,35 +75,20 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
 
   while(TRUE){
 
+    if(scoring=='pois'){
+      if(istep %% frq.update==0)
+        xi <- update.field(ci=ci, xi=xi, hyper=hyper, po=po, A=A)
+      cache <- local.score(ci=ci, xi=xi, ac=ac, kappa=kappa,
+                           discrete=discrete, scoring=scoring,
+                           score=score, hyper=hyper, po=po, g=g,
+                           progress.bar=progress.bar, ncores=ncores)
+    }
+
     Pawgh <- partition.pset(A=A, xi=xi, q=q, ac=ac, path=path,
                       kappa=kappa,cache=cache, progress.bar=progress.bar,
-                      ncores=ncores, useC=useC)
-    nh <- length(Pawgh$PaH)
-    prob <- exp(Pawgh$KH)
-    prob <- prob/sum(prob)
-    h <- sample(seq_len(nh), size=1, prob=prob)  # Parition index
-
-    pah <- Pawgh$PaH[[h]]
-    W <- names(pah)
-    aw <- A
-    A1 <- A
-    A1[,W] <- 0
-    for(w in W){
-      prob <- NULL
-      np <- length(pah[[w]])
-      paw <- list()
-      for(j in seq_len(np)){
-        pa <- pah[[w]][j]
-        paw[[j]] <- nodes[which(ac[,pa]==1)]
-        sc <- cache[w,pa]
-        prob <- c(prob,sc)
-      }
-      prob <- prob-max(prob)
-      prob <- exp(prob)
-      prob <- prob/sum(prob)
-      hi <- sample(np, size=1,prob=prob)
-      A1[paw[[hi]],w] <- 1
-    }
+                      ncores=ncores)
+    A1 <- sample.subgraph(A=A, Pawgh=Pawgh, ac=ac, cache=cache,
+                          path=path)
     path <- path.update(A0=A, A1=A1, path)
     A <- A1
 
@@ -111,6 +115,17 @@ mc.sample <- function(xi, dag=NULL, ref=NULL,
           llk <- mvn.score(xi=xi, hyper=hyper, A=A)
         else if(scoring=='g')
           llk <- g.score.global(xi=xi, A=A, g=g, ac=ac, cache=cache)
+        else if(scoring=='g2')
+          llk <- g2.score.global(xi=xi, A=A, g=g, ac=ac, cache=cache)
+        else if(scoring=='diag')
+          llk <- diag.score.global(xi=xi, A=A, hyper=hyper, ac=ac,
+                                   cache=cache)
+        else if(scoring=='ninvg')
+          llk <- ninvg.score.global(xi=xi, A=A, hyper=hyper, ac=ac,
+                                   cache=cache)
+        else if(scoring=='pois')
+          llk <- pois.score.global(ci=ci,xi=xi,A=A,hyper=hyper,po=po,
+                                   ac=ac, cache=cache)-const
         else stop('Unknown scoring')
 
         cat('istep = ',istep,', log LK = ',llk/m/p,', mean distance = ',
@@ -169,7 +184,7 @@ neighbor <- function(A){
 #' Enumerate and store local scores of all parent sets
 #' @export
 
-compute.score <- function(xi, kappa=3, discrete=FALSE, scoring='ml',
+compute.score <- function(ci=NULL, xi, kappa=3, discrete=FALSE, scoring='ml',
                           hyper=NULL, g=1e10, progress.bar=TRUE,nprime=1,
                           ncores=1){
 
@@ -188,10 +203,44 @@ compute.score <- function(xi, kappa=3, discrete=FALSE, scoring='ml',
                 mu0=hyper$mu0, Sig=Sig)
   }
 
-  cache <- local.score(xi=xi, ac=ac, kappa=kappa, discrete=discrete,
-                       scoring=scoring, score=score, g=g, hyper=hyper,
-                       nprime=nprime,
+  cache <- local.score(ci=ci, xi=xi, ac=ac, kappa=kappa, discrete=discrete,
+                       scoring=scoring, score=score, hyper=hyper,
+                       g=g, nprime=nprime,
                        progress.bar=progress.bar, ncores=ncores)
 
   return(cache)
+}
+
+# Sample new parent set using factorization result
+
+sample.subgraph <- function(A, Pawgh, ac, cache,path){
+
+  nh <- length(Pawgh$PaH)
+  prob <- exp(Pawgh$KH)
+  prob <- prob/sum(prob)
+  h <- sample(seq_len(nh), size=1, prob=prob)  # Partition index
+
+  pah <- Pawgh$PaH[[h]]
+  W <- names(pah)
+  aw <- A
+  A1 <- A
+  A1[,W] <- 0
+  for(w in W){
+    prob <- NULL
+    np <- length(pah[[w]])
+    paw <- list()
+    for(j in seq_len(np)){
+      pa <- pah[[w]][j]
+      paw[[j]] <- nodes[which(ac[,pa]==1)]
+      sc <- cache[w,pa]
+      prob <- c(prob,sc)
+    }
+    prob <- prob-max(prob)
+    prob <- exp(prob)
+    prob <- prob/sum(prob)
+    hi <- sample(np, size=1,prob=prob)
+    A1[paw[[hi]],w] <- 1
+  }
+
+  return(A1)
 }

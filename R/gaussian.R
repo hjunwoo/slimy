@@ -6,26 +6,40 @@ g.score <- function(xi, node, pa, g){
   z <- 0
   npa <- length(pa)
 
-# if(npa>=1){
-#   w <- 0
-#   fit <- lm(x ~ ., data=data.frame(x=xi[,i],xpa=xi[,pa]))
-#   r2 <- summary(fit)$r.squared
-#   w <- w + (nsample-1-npa)*log(1+g)/2-(nsample-1)*log(1+g*(1-r2))/2
-#   xm <- mean(xi[,i])
-#   w <- w - (nsample-1)*log(sum((xi[,i]-xm)^2))
-# }
-# else w <- w - 0.5*(nsample-1)*log(1+g)
-
   y <- xi[,node]
   v <- crossprod(y-mean(y))
+  xf <- 0
   if(npa >= 1){
     xpa <- as.matrix(xi[,pa])
     xtx <- solve(crossprod(xpa))
     fit <- xtx %*% crossprod(xpa,y)
     ress <- crossprod(y - xpa %*% fit)
-    z <- z + 0.5*(nsample-1-npa)*log(1+g)-0.5*(nsample-1)*log(1+g*(ress/v))
+    z <- z + 0.5*(nsample-1-npa)*log(1+g)-
+      0.5*(nsample-1)*log(1+g*(ress/v))
+#   xf <- xpa %*% fit
   }
   z <- z - 0.5*(nsample-1)*log(v)
+# z <- z - 0.5*(nsample-1)*log(v+g*sum((y-xf)^2))
+# z <- z + 0.5*(nsample-npa-1)*log(1+g)
+
+  return(z)
+}
+#' compute the g2-prior score
+#' @export
+g2.score <- function(xi, node, pa, g){
+
+  nsample <- nrow(xi)
+  npa <- length(pa)
+
+  y <- xi[,node]
+  v <- crossprod(y-mean(y))  # y^t*y
+  if(npa >= 1){
+    xpa <- as.matrix(xi[,pa])
+    xtx <- solve(crossprod(xpa))
+    fit <- xtx %*% crossprod(xpa,y)
+    v <- v - g/(1+g)*crossprod(xpa %*% fit)
+  }
+  z <- -0.5*npa*log(1+g)-0.5*nsample*log(v)
 
   return(z)
 }
@@ -38,6 +52,64 @@ g.score.global <- function(xi, A, g, ac=NULL, cache=NULL){
     pa <- nodes[which(A[,w]!=0)]
     if(is.null(cache))
       llk <- llk + g.score(xi=xi, node=w, pa=pa, g=g)
+    else{
+      z <- apply(ac,2,function(x){sum(x!=A[,w])})
+      k <- which(z==0)
+      llk <- llk + cache[w,k]
+    }
+  }
+
+  return(llk)
+}
+
+g2.score.global <- function(xi, A, g, ac=NULL, cache=NULL){
+
+  nodes <- colnames(A)
+  llk <- 0
+  for(w in nodes){
+    pa <- nodes[which(A[,w]!=0)]
+    if(is.null(cache))
+      llk <- llk + g2.score(xi=xi, node=w, pa=pa, g=g)
+    else{
+      z <- apply(ac,2,function(x){sum(x!=A[,w])})
+      k <- which(z==0)
+      llk <- llk + cache[w,k]
+    }
+  }
+
+  return(llk)
+}
+
+#' compute the g2-prior score
+#' @export
+diag.score <- function(xi, node, pa, hyper){
+
+  nsample <- nrow(xi)
+  npa <- length(pa)
+
+  y <- xi[,node]
+  v <- 2*hyper$b + crossprod(y-mean(y))  # y^t*y
+  if(npa >= 1){
+    xpa <- as.matrix(xi[,pa])
+    xtx <- solve(diag(npa)+hyper$v*crossprod(xpa))
+    xy <- crossprod(xpa,y)
+    v <- v - hyper$v*t(xy) %*% xtx %*% xy
+  }
+  z <- -(0.5*nsample+hyper$a)*log(v)
+  if(npa>0)
+    z <- z + 0.5*determinant(xtx,log=TRUE)$modulus
+
+  return(z)
+}
+
+diag.score.global <- function(xi, A, hyper, ac=NULL, cache=NULL){
+
+  nodes <- colnames(A)
+  llk <- 0
+  for(w in nodes){
+    pa <- nodes[which(A[,w]!=0)]
+    if(is.null(cache))
+      llk <- llk + diag.score(xi=xi, node=w, pa=pa, hyper=hyper)
     else{
       z <- apply(ac,2,function(x){sum(x!=A[,w])})
       k <- which(z==0)
@@ -155,4 +227,40 @@ hyper.par <- function(xi, nu, alpha, v, mu0, Sig){
 
   h <- list(nu=nu,alpha=alpha,v=v,mu0=mu0,T0=T0,Tm=Tm)
   return(h)
+}
+
+#' compute the normal-inv-gamma-prior score
+#' @export
+ninvg.score <- function(xi, node, pa, hyper){
+
+  npa <- length(pa)
+  if(npa == 0) return(0)
+
+  nsample <- nrow(xi)
+  y <- xi[,node]
+  xpa <- as.matrix(xi[,pa])
+  dy <- y-hyper$mu*rowSums(xpa)
+  z1 <- sum(dy^2)
+  z2 <- sum((t(xpa) %*% dy)^2)
+  z <- -(hyper$a+0.5)*log(1 + (z1+z2)/2/hyper$b)
+
+  return(z)
+}
+
+ninvg.score.global <- function(xi, A, hyper, ac=NULL, cache=NULL){
+
+  nodes <- colnames(A)
+  llk <- 0
+  for(w in nodes){
+    pa <- nodes[which(A[,w]!=0)]
+    if(is.null(cache))
+      llk <- llk + ninvg.score(xi=xi, node=w, pa=pa, hyper=hyper)
+    else{
+      z <- apply(ac,2,function(x){sum(x!=A[,w])})
+      k <- which(z==0)
+      llk <- llk + cache[w,k]
+    }
+  }
+
+  return(llk)
 }

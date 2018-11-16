@@ -275,7 +275,7 @@ simulate.data <- function(dag, nsample, sd=1.0, progress.bar=FALSE){
     if(progress.bar) setTxtProgressBar(pb, value=k/nsample)
   }
   if(progress.bar) close(pb)
-  xi <- as.data.frame(xi)
+  xi <- as.matrix(xi)
   rownames(xi) <- seq_len(nsample)
   colnames(xi) <- nodes
   return(xi)

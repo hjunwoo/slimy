@@ -119,18 +119,20 @@ parent.sets <- function(nodes, kappa=3){
 
 # computes local score conditional to all possible parent sets for each node
 
-local.score <- function(xi, ac, kappa, discrete=TRUE, scoring='ml',
+local.score <- function(ci, xi, ac, kappa, discrete=TRUE, scoring='ml',
                         score=NULL, g=NULL, nprime=1,
-                        hyper=NULL, progress.bar=FALSE, ncores=1){
+                        hyper=NULL, po=NULL, progress.bar=FALSE, ncores=1){
 
-  nodes <- colnames(xi)
+  if(is.null(dim(xi))) nodes <- names(xi)
+  else nodes <- colnames(xi)
   p <- length(nodes)
   cache <- matrix(0, nrow=p, ncol=ncol(ac))
   rownames(cache) <- nodes
 
-  cat('Computing local scores ...\n')
+  if(scoring!='pois') cat('Computing local scores ...\n')
 
-  bundle <- list(xi=xi, ac=ac, hyper=hyper, discrete=discrete,
+  bundle <- list(ci=ci,xi=xi, ac=ac, hyper=hyper, po=po,
+                 discrete=discrete,
                  scoring=scoring, g=g, nprime=nprime)  # parameter set
 
   nac <- ncol(ac)  # no. of parent sets
@@ -156,15 +158,20 @@ local.score <- function(xi, ac, kappa, discrete=TRUE, scoring='ml',
 
 fill.cache <- function(iac, bundle){
 
+  ci <- bundle$ci
   xi <- bundle$xi
   ac <- bundle$ac
   hyper <- bundle$hyper
+  po <- bundle$po
   discrete <- bundle$discrete
   scoring <- bundle$scoring
   g <- bundle$g
   nprime <- bundle$nprime
 
-  nodes <- colnames(xi)
+  if(!is.null(dim(xi)))
+    nodes <- colnames(xi)
+  else
+    nodes <- names(xi)
   p <- length(nodes)
 
   pa <- nodes[which(ac[,iac]==1)]
@@ -193,9 +200,17 @@ fill.cache <- function(iac, bundle){
           A1[pa,w] <- 1
           sc <- mvn.score(xi=xi, hyper.par=par, A=A1)
         }
-        else if(scoring=='g'){
+        else if(scoring=='g')
           sc <- g.score(xi=xi, node=w, pa=pa, g=g)
-        }
+        else if(scoring=='g2')
+          sc <- g2.score(xi=xi, node=w, pa=pa, g=g)
+        else if(scoring=='diag')
+          sc <- diag.score(xi=xi, node=w, pa=pa, hyper=hyper)
+        else if(scoring=='ninvg')
+          sc <- ninvg.score(xi=xi, node=w, pa=pa, hyper=hyper)
+        else if(scoring=='pois')
+          sc <- pois.score(ci=ci,xi=xi,node=w, pa=pa, hyper=hyper,
+                           po=po)
         else stop('Unknown scoring')
       }
     }

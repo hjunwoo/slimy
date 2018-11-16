@@ -42,3 +42,37 @@ margL.scan <- function(xi, ref=NULL, hyper.range, discrete=FALSE,
   z <- list(elv=elv, elx=elx)
   return(z)
 }
+
+#' Run multiple chains with varying initial graphs
+#' @export
+mc.multichain <- function(nchain=2, xi, ref=NULL, discrete=FALSE,
+                      nstep=1000, verbose=3, scoring='ml', cache=NULL,
+                      progress.bar=FALSE, burn.in=100, map=FALSE,
+                      hyper=NULL, q=2, npr=100, nplot=npr, kappa=3,
+                      nprime=1,attrs=NULL, init.deg=0,
+                      g=1e10, ncores=1){
+
+  if(is.null(cache)){
+    ac <- parent.sets(nodes=colnames(xi), kappa=kappa)
+    cache <- local.score(xi=xi, ac=ac, kappa=kappa,
+                       discrete=discrete, scoring=scoring,
+                       score=score, hyper=hyper, g=g,
+                       progress.bar=progress.bar, ncores=ncores)
+  }
+
+  for(k in seq_len(nchain)){
+    cat('Chain #', k, ': \n')
+    mc <- mc.sample(xi, dag=NULL, ref=ref,
+             discrete=discrete, nstep=nstep, verbose=verbose,
+             scoring=scoring, cache=cache, progress.bar=progress.bar,
+             burn.in=burn.in, map=map, hyper=hyper, q=q, npr=npr,
+             nplot=nplot, kappa=kappa, nprime=nprime, attrs=attrs,
+             init.deg=init.deg, g=g, ncores=ncores)
+    cat('Mean log LK = ',mc$elm,'\n\n',sep='')
+    if(k==1) max.chain <- mc
+    else if(mc$elm > max.chain$elm)
+      max.chain <- mc
+  }
+  cat('Max mean log LK = ',max.chain$elm,'\n\n',sep='')
+  return(max.chain)
+}
