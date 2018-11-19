@@ -3,9 +3,12 @@
 #' @param dag Graph object of class \code{graphAM}
 #' @param nprime Prior count
 #' @export
-multinom.score <- function(xi, dag, scoring='K2', nprime=1){
+multinom.score <- function(xi, dag, prior='K2', hyper){
 
-  if(scoring=='K2') nprime <- 1
+  if(!('nprime' %in% names(hyper)))
+    nprime <- 1
+  else nprime <- hyper$nprime
+  if(prior=='K2') nprime <- 1
 
   p <- ncol(xi)
   nodes <- nodes(dag)
@@ -57,10 +60,13 @@ multinom.score <- function(xi, dag, scoring='K2', nprime=1){
   return(score)
 }
 
-multinom.local.score <- function(xi, node, parents, scoring='K2',
-                                 hyper=NULL, nprime=1){
+multinom.local.score <- function(xi, node, parents, prior='K2',
+                                 hyper=NULL){
 
-  if(scoring=='K2') nprime <- 1
+  if(!('nprime' %in% names(hyper)))
+    nprime <- 1
+  else nprime <- hyper$nprime
+  if(prior=='K2') nprime <- 1
 
   nodes <- c(parents,node)
   p <- length(nodes)
@@ -96,7 +102,7 @@ multinom.local.score <- function(xi, node, parents, scoring='K2',
   else egsc <- sum(eg$count)
 
   nijk <- nprime
-  if(scoring=='BDeu'){
+  if(prior=='BDeu'){
     nijk <- nijk/length(levels[[node]])
     if(np > 0) nijk <- nijk/np
   }

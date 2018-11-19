@@ -254,7 +254,8 @@ rgraph <- function(dag=NULL, nodes=NULL, mean.degree=1, max.degree=Inf,
 
 #' Generate simulated data for discrete graph
 #' @export
-simulate.data <- function(dag, nsample, sd=1.0, progress.bar=FALSE){
+simulate.data <- function(dag, nsample, sd=1.0, progress.bar=FALSE,
+                          count=FALSE, mu=1, sig=1){
 
   nodes <- nodes(dag)
   parents <- inEdges(dag)
@@ -276,6 +277,11 @@ simulate.data <- function(dag, nsample, sd=1.0, progress.bar=FALSE){
   }
   if(progress.bar) close(pb)
   xi <- as.matrix(xi)
+
+  if(count)   # generate Poisson count from latent fields
+    xi <- apply(xi, c(1,2),
+            function(x){rpois(n=1,lambda=exp(mu + sig*x))})
+
   rownames(xi) <- seq_len(nsample)
   colnames(xi) <- nodes
   return(xi)

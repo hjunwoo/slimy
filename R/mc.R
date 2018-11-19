@@ -6,7 +6,6 @@
 #' @param discrete \code{TRUE} if discrete data. If \code{FALSE}, gaussian data
 #'             assumed
 #' @param nstep Number of steps
-#' @param Big Parameter for maximum numbers in exponents
 #' @param verbose Level of verbosity
 #' @param representation Method options for Gibbs sampling;
 #'                      \code{c('gm','parent.set','edge.set')}
@@ -15,56 +14,57 @@
 #' @param kappa Maximum in-degree per node assumed
 #' @param burn.in Initial periods to throw away before collecting statistics
 #' @export
-mc.sample <- function(ci=NULL, xi=NULL, dag=NULL, ref=NULL,
-                      discrete=FALSE,
-                      nstep=1000, verbose=3, scoring='ml', cache=NULL,
+mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
+                      kappa=NULL,
                       progress.bar=FALSE, burn.in=100, map=FALSE,
-                      hyper=NULL, q=2, npr=100, nplot=npr, kappa=3,
-                      nprime=1,attrs=NULL, init.deg=2, frq.update=1,
-                      g=1e10, ncores=1, useC=FALSE){
+                      q=2, npr=100, nplot=npr, nprime=1,attrs=NULL,
+                      init.deg=2, frq.update=1,
+                      ncores=1, update.n=100, useC=TRUE){
 
+  type <- object@data.type
   if(burn.in >= nstep) burn.in <- nstep-1
-  Big <- 100    # exp(-x)=0 for x > Big
-  if(is.null(ci)){
-    m <- nrow(xi) # no. of samples
-    p <- ncol(xi) # no. of nodes
-    nodes <- colnames(xi)
-  }
-  else{
-    m <- nrow(ci)
-    p <- ncol(ci)
-    nodes <- colnames(ci)
-  }
+  m <- object@nsample
+  p <- object@p
+  nodes <- object@nodes
+  if(is.null(kappa)) kappa <- object@kappa
+  prior <- object@prior
+  hyper <- object@hyper
 
-
-  if(scoring=='pois'){
-    po <- pois_stat(yi=ci)
-    const <- sum(lfactorial(ci))
-  }
-
-  if(is.null(dag))   # initial graph
-    dag <- rgraph(nodes=nodes,discrete=discrete,mean.degree=init.deg,
-                    max.degree=kappa)
+  discrete <- type=='discrete'
+  if(is.null(init.dag))   # initial graph
+    dag <- rgraph(nodes=nodes, discrete=discrete,
+                       mean.degree=init.deg, max.degree=kappa)
   A <- as(dag,'matrix')
   A <- apply(A,1:2,as.numeric)
   colnames(A) <- nodes
 
+  ref <- object@ref.dag
+
   sumd <- 0
   cnt <- 0
 
-  ac <- parent.sets(nodes=nodes, kappa)
-
-  if(scoring=='pois'){
-#    xi <- rnorm(n=p)   # initial field
-#    names(xi) <- nodes
-    xi <- matrix(rnorm(n=p*nsample),nrow=nsample,ncol=p)
-    colnames(xi) <- nodes
+  ac <- object@ac
+  cache <- object@cache
+  if(sum(dim(ac))==0){
+    ac <- parent.sets(nodes=nodes, kappa)
+    object@ac <- ac
   }
-  else if(is.null(cache))
-    cache <- local.score(ci=ci, xi=xi, ac=ac, kappa=kappa,
-                             discrete=discrete, scoring=scoring,
-                             score=score, hyper=hyper, g=g,
-                             progress.bar=progress.bar, ncores=ncores)
+
+  if(type=='counts'){
+    ci <- object@data
+    po <- pois_stat(yi=ci)
+    xi <- MASS::mvrnorm(n=nsample, mu=po$mu, Sigma=po$sigma)
+    const <- sum(lfactorial(ci))
+    const <- const + lgamma(hyper$a+0.5) - 0.5*nsample*log(pi)
+    if(hyper$a > 0) const <- const - lgamma(hyper$a)
+    if(hyper$b > 0) const <- const + hyper$a*log(2*hyper$b)
+    colnames(xi) <- nodes
+    object@latent.var <- xi
+    po$sigma <- diag(po$sigma)
+  }
+  else if(sum(dim(cache))==0) # score absent
+    cache <- local.score(object, kappa=kappa,
+                         progress.bar=progress.bar, ncores=ncores)
   path <- path.count(dag=dag)$C
 
   istep <- iburned <- 0
@@ -75,17 +75,21 @@ mc.sample <- function(ci=NULL, xi=NULL, dag=NULL, ref=NULL,
 
   while(TRUE){
 
-    if(scoring=='pois'){
+    W <- sample(nodes,size=q)
+    if(type=='counts'){
       if(istep %% frq.update==0)
-        xi <- update.field(ci=ci, xi=xi, hyper=hyper, po=po, A=A)
-      cache <- local.score(ci=ci, xi=xi, ac=ac, kappa=kappa,
-                           discrete=discrete, scoring=scoring,
-                           score=score, hyper=hyper, po=po, g=g,
-                           progress.bar=progress.bar, ncores=ncores)
+        object <- update.field(object, W=W, hyper=hyper,
+                               po=po, A=A,
+                               update.n=update.n, useC=useC)
+      object <- local.score(object, kappa=kappa, po=po,
+                           progress.bar=progress.bar,
+                           ncores=ncores)
+      cache <- object@cache
     }
 
-    Pawgh <- partition.pset(A=A, xi=xi, q=q, ac=ac, path=path,
-                      kappa=kappa,cache=cache, progress.bar=progress.bar,
+    Pawgh <- partition.pset(A=A, xi=xi, q=q, W=W, ac=ac, path=path,
+                      kappa=kappa,cache=cache,
+                      progress.bar=progress.bar,
                       ncores=ncores)
     A1 <- sample.subgraph(A=A, Pawgh=Pawgh, ac=ac, cache=cache,
                           path=path)
@@ -95,38 +99,30 @@ mc.sample <- function(ci=NULL, xi=NULL, dag=NULL, ref=NULL,
     istep <- istep + 1
 
     if(verbose>=2){
-      if(!is.null(ref)){
+      if(!sum(dim((ref@adjMat)))==0){
         d <- distance(m=A, mref=as(ref,'matrix'))
-        cnt <- cnt + 1
         sumd <- sumd + d
       }
+      cnt <- cnt + 1
+
       if(cnt==npr){
         ddag <- graphAM(adjMat=A,edgemode='directed')
         if(discrete){
           if(is.null(cache))
-            llk <- multinom.score(xi, dag=ddag, scoring=scoring,
-                                nprime=nprime)
+            llk <- multinom.score(xi, dag=ddag, hyper=hyper)
           else
             llk <- multinom.cache.score(dag=ddag, ac, cache)
         }
-        else if(scoring=='ml')
-          llk <- score$global.score(as(A,'GaussParDAG'))
-        else if(scoring=='bge')
-          llk <- mvn.score(xi=xi, hyper=hyper, A=A)
-        else if(scoring=='g')
-          llk <- g.score.global(xi=xi, A=A, g=g, ac=ac, cache=cache)
-        else if(scoring=='g2')
-          llk <- g2.score.global(xi=xi, A=A, g=g, ac=ac, cache=cache)
-        else if(scoring=='diag')
+        else if(type=='counts')
+          llk <- pois.score.global(ci=ci,xi=xi,A=A,hyper=hyper,
+                                   po=po, ac=ac, cache=cache)-const
+        else if(prior=='g')
+          llk <- g.score.global(xi=xi, A=A, hyper=hyper,
+                                ac=ac, cache=cache)
+        else if(prior=='diag')
           llk <- diag.score.global(xi=xi, A=A, hyper=hyper, ac=ac,
                                    cache=cache)
-        else if(scoring=='ninvg')
-          llk <- ninvg.score.global(xi=xi, A=A, hyper=hyper, ac=ac,
-                                   cache=cache)
-        else if(scoring=='pois')
-          llk <- pois.score.global(ci=ci,xi=xi,A=A,hyper=hyper,po=po,
-                                   ac=ac, cache=cache)-const
-        else stop('Unknown scoring')
+        else stop('Unknown type/prior')
 
         cat('istep = ',istep,', log LK = ',llk/m/p,', mean distance = ',
             sumd/cnt,'\n',sep='')
@@ -146,22 +142,29 @@ mc.sample <- function(ci=NULL, xi=NULL, dag=NULL, ref=NULL,
           iburned <- iburned + 1
           edge.prob <- edge.prob + A
           if(is.null(Map))
-            Map <- list(dag=ddag, score=llk)
+            Map <- list(dag=ddag, score=llk/m/p)
           else if(llk > Map$score)
-            Map <- list(dag=ddag, score=llk)
+            Map <- list(dag=ddag, score=llk/m/p)
           Elm <- c(Elm, llk)
         }
       }
     }
     if(istep>=nstep) break
   }
+  Elm <- mean(Elm)/m/p
+
   colnames(A) <- colnames(xi)
   dag <- graphAM(adjMat=A, edgemode='directed')
+  object@dag <- dag
   edge.prob <- edge.prob/iburned
-  Elm <- mean(Elm)/m/p
-  z <- list(dag=dag, map=Map, edge.prob=edge.prob, elm=Elm)
+  object@edge.prob <- edge.prob
+  object@map <- Map
+  object@mlk <- llk/m/p
+  object@ac <- ac
+  object@cache <- cache
+  object@emlk <- Elm
 
-  return(z)
+  return(object)
 }
 
 neighbor <- function(A){
@@ -184,31 +187,17 @@ neighbor <- function(A){
 #' Enumerate and store local scores of all parent sets
 #' @export
 
-compute.score <- function(ci=NULL, xi, kappa=3, discrete=FALSE, scoring='ml',
-                          hyper=NULL, g=1e10, progress.bar=TRUE,nprime=1,
-                          ncores=1){
+compute.score <- function(object=NULL, kappa=3, prior='g', hyper=NULL,
+                          progress.bar=TRUE, ncores=1){
 
-  ac <- parent.sets(nodes=colnames(xi), kappa)
-  if(!discrete)
-    if(scoring=='ml') score <- new('GaussL0penObsScore',xi)
+  object@kappa <- kappa
+  object@ac <- parent.sets(nodes=colnames(xi), kappa)
+  object@prior <- prior
+  if(!is.null(hyper)) object@hyper <- hyper
+  object <- local.score(object, kappa=kappa, progress.bar=progress.bar,
+                       ncores=ncores)
 
-  if(scoring=='bge'){
-    if(is.null(hyper)) stop('Hyperparameters for bge score missing')
-    B <- hyper$B
-    n <- nrow(B)
-    W <- precision(v=hyper$v, B=B)
-    Sig <- solve(a=W, b=diag(n))
-    rownames(Sig) <- colnames(Sig) <- rownames(B)
-    hyper <- list(nu=hyper$nu, alpha=hyper$alpha, v=hyper$v,
-                mu0=hyper$mu0, Sig=Sig)
-  }
-
-  cache <- local.score(ci=ci, xi=xi, ac=ac, kappa=kappa, discrete=discrete,
-                       scoring=scoring, score=score, hyper=hyper,
-                       g=g, nprime=nprime,
-                       progress.bar=progress.bar, ncores=ncores)
-
-  return(cache)
+  return(object)
 }
 
 # Sample new parent set using factorization result

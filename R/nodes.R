@@ -1,103 +1,3 @@
-select_edges <- function(A, xi, q,score,scoring='K2',nprime=1,
-                         nnodes=1,discrete=FALSE){
-
-  qpair <- NULL
-  p <- nrow(A)
-  pair <- expand.grid(i=seq_len(p),j=seq_len(p))
-  pair <- pair[pair[,1]!=pair[,2],]
-  idx <- sample(x=p*(p-1)/2, size=q, replace=FALSE)
-  qpair <- pair[idx,]
-
-  ir <- list()
-  for(i in seq_len(q)) ir[[i]] <- 0:1
-  x <- expand.grid(ir)
-  nx <- nrow(x)
-  sc <- c()
-  for(k in seq_len(nx)){
-    Ak <- A
-    for(l in seq_len(q))
-      Ak[qpair[l,1],qpair[l,2]] <- x[k,l]
-    if(is.DAG(Ak)){
-      if(discrete){
-        dag <- graphAM(adjMat=Ak,edgemode='directed')
-        sc <- c(sc, multinom.score(xi=xi, dag=dag,
-                                   scoring=scoring,nprime=nprime))
-      }
-      else{
-        dag <- as(Ak,'GaussParDAG')
-        sc <- c(sc, score$global.score(dag))
-      }
-    }
-    else
-      sc <- c(sc,NA)
-  }
-  bad <- is.na(sc)
-  sc <- sc[!bad]
-  x <- x[!bad,]
-
-  if(sum(!bad)>0){
-    sc <- exp(sc - max(sc))
-    sc <- sc/sum(sc)
-    x <- cbind(x,sc)
-  }
-  else x <- NULL
-  z <- list(index=qpair, score=x)
-
-  return(z)
-}
-
-select_parents <- function(A, xi, q,ac,score,kappa=3,discrete=FALSE,
-                           nnodes=1, verbose=1,progress.bar=progress.bar){
-
-  p <- nrow(A)
-  nodes <- sample(seq_len(p),size=q,replace=FALSE)
-
-  nset <- ncol(ac)
-  idx <- list()
-  for(k in seq_len(q)) idx[[k]] <- seq_len(nset)
-  grid <- expand.grid(idx)
-  sc <- c()
-  if(progress.bar) pb <- txtProgressBar(style=3)
-  for(m in seq_len(nrow(grid))){
-    Ak <- A
-    for(k in seq_len(q)) Ak[,nodes[k]] <- ac[,grid[m,k]]
-    if(sum(diag(Ak)) > 0) sc <- c(sc,NA)
-    else if(!is.DAG(Ak))
-      sc <- c(sc, NA)
-    else{
-      if(discrete){
-        dag <- graphAM(adjMat=Ak,edgemode='directed')
-        sc <- c(sc, multinom.score(xi=xi, dag=dag,scoring=scoring,
-                                   nprime=nprime))
-      }
-      else{
-        dag <- as(Ak,'GaussParDAG')
-        sc <- c(sc, score$global.score(dag))
-      }
-    }
-    if(progress.bar) setTxtProgressBar(pb, m/nrow(grid))
-  }
-  if(progress.bar) close(pb)
-  bad <- is.na(sc)
-  sc <- sc[!bad]
-  grid <- grid[!bad,]
-
-  if(sum(!bad)>0){
-    sc <- exp(sc - max(sc))
-    sc <- sc/sum(sc)
-    grid <- cbind(grid,sc)
-  }
-  else{
-    return(list(flag=TRUE))
-  }
-
-  id <- sample(seq_len(nrow(grid)),size=1,prob=grid[,q+1])
-  Ak <- A
-  for(k in seq_len(q)) Ak[,nodes[k]] <- ac[,grid[id,k]]
-
-  return(list(Ak=Ak,flag=FALSE))
-}
-
 # returns matrix of columns each representing all possible parent sets
 
 parent.sets <- function(nodes, kappa=3){
@@ -118,23 +18,19 @@ parent.sets <- function(nodes, kappa=3){
 }
 
 # computes local score conditional to all possible parent sets for each node
+local.score <- function(object, kappa, po=NULL, progress.bar, ncores){
 
-local.score <- function(ci, xi, ac, kappa, discrete=TRUE, scoring='ml',
-                        score=NULL, g=NULL, nprime=1,
-                        hyper=NULL, po=NULL, progress.bar=FALSE, ncores=1){
-
-  if(is.null(dim(xi))) nodes <- names(xi)
-  else nodes <- colnames(xi)
+  nodes <- object@nodes
+  xi <- object@data
   p <- length(nodes)
+  ac <- object@ac
   cache <- matrix(0, nrow=p, ncol=ncol(ac))
   rownames(cache) <- nodes
 
-  if(scoring!='pois') cat('Computing local scores ...\n')
+  if(object@data.type != 'counts')
+    cat('Computing local scores ...\n')
 
-  bundle <- list(ci=ci,xi=xi, ac=ac, hyper=hyper, po=po,
-                 discrete=discrete,
-                 scoring=scoring, g=g, nprime=nprime)  # parameter set
-
+  bundle <- list(object=object, po=po)
   nac <- ncol(ac)  # no. of parent sets
   if(ncores==1){
     if(progress.bar) pb <- txtProgressBar(style=3)
@@ -146,33 +42,42 @@ local.score <- function(ci, xi, ac, kappa, discrete=TRUE, scoring='ml',
     if(progress.bar) close(pb)
   }
   else{            # parallel
-    Rmpi::mpi.bcast.Robj2slave(bundle)
-    lcache <- Rmpi::mpi.applyLB(seq_len(nac), FUN=fill.cache, bundle)
+    Rmpi::mpi.bcast.Robj2slave(object)
+    lcache <- Rmpi::mpi.applyLB(seq_len(nac), FUN=fill.cache,
+                                bundle)
   }
 
+  maxs <- -Inf
   for(iac in seq_len(nac))
-    cache[,iac] <- lcache[[iac]]
+    for(x in lcache[[iac]]) if(!is.na(x)) if(x>maxs) maxs <- x
 
-  return(cache)
+  for(iac in seq_len(nac)){
+    z <- lcache[[iac]]
+    for(i in seq_len(length(z))) if(!is.na(z[i])) z[i] <- z[i] - maxs
+    cache[,iac] <- z
+  }
+
+  object@cache <- cache
+  return(object)
 }
 
 fill.cache <- function(iac, bundle){
 
-  ci <- bundle$ci
-  xi <- bundle$xi
-  ac <- bundle$ac
-  hyper <- bundle$hyper
+  object <- bundle$object
   po <- bundle$po
-  discrete <- bundle$discrete
-  scoring <- bundle$scoring
-  g <- bundle$g
-  nprime <- bundle$nprime
 
-  if(!is.null(dim(xi)))
-    nodes <- colnames(xi)
-  else
-    nodes <- names(xi)
+  ac <- object@ac
+  hyper <- object@hyper
+  prior <- object@prior
+  nodes <- object@nodes
   p <- length(nodes)
+  type <- object@data.type
+  if(type=='counts'){
+    ci <- object@data
+    xi <- object@latent.var
+  }
+  else xi <- object@data
+
 
   pa <- nodes[which(ac[,iac]==1)]
   lcache <- c()
@@ -187,31 +92,16 @@ fill.cache <- function(iac, bundle){
       A[pa,w] <- 1
       if(!is.DAG(A)) sc <- NA
       else{
-        if(discrete) sc <-
-            multinom.local.score(xi, w, pa,scoring=scoring,
-                                 hyper=hyper, nprime=nprime)
-        else if(scoring=='ml')
-          sc <- score$local.score(vertex=which(w==nodes),
-                                       parents=match(pa,nodes))
-        else if(scoring=='bge'){
-          par <- hyper.par(xi=xi, nu=hyper$nu, alpha=hyper$alpha,
-                             v=hyper$v, mu0=hyper$mu0, Sig=hyper$Sig)
-          A1 <- A
-          A1[pa,w] <- 1
-          sc <- mvn.score(xi=xi, hyper.par=par, A=A1)
-        }
-        else if(scoring=='g')
-          sc <- g.score(xi=xi, node=w, pa=pa, g=g)
-        else if(scoring=='g2')
-          sc <- g2.score(xi=xi, node=w, pa=pa, g=g)
-        else if(scoring=='diag')
-          sc <- diag.score(xi=xi, node=w, pa=pa, hyper=hyper)
-        else if(scoring=='ninvg')
-          sc <- ninvg.score(xi=xi, node=w, pa=pa, hyper=hyper)
-        else if(scoring=='pois')
+        if(type=='discrete') sc <-
+            multinom.local.score(xi, w, pa, prior=prior, hyper=hyper)
+        else if(type=='counts')
           sc <- pois.score(ci=ci,xi=xi,node=w, pa=pa, hyper=hyper,
                            po=po)
-        else stop('Unknown scoring')
+        else if(prior=='g')
+          sc <- g.score(xi=xi, node=w, pa=pa, hyper=hyper)
+        else if(prior=='diag')
+          sc <- diag.score(xi=xi, node=w, pa=pa, hyper=hyper)
+        else stop('Unknown prior')
       }
     }
     lcache[i] <- sc

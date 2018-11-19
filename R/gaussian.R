@@ -1,57 +1,38 @@
 #' compute the g-prior score
 #' @export
-g.score <- function(xi, node, pa, g){
-
-  nsample <- nrow(xi)
-  z <- 0
-  npa <- length(pa)
-
-  y <- xi[,node]
-  v <- crossprod(y-mean(y))
-  xf <- 0
-  if(npa >= 1){
-    xpa <- as.matrix(xi[,pa])
-    xtx <- solve(crossprod(xpa))
-    fit <- xtx %*% crossprod(xpa,y)
-    ress <- crossprod(y - xpa %*% fit)
-    z <- z + 0.5*(nsample-1-npa)*log(1+g)-
-      0.5*(nsample-1)*log(1+g*(ress/v))
-#   xf <- xpa %*% fit
-  }
-  z <- z - 0.5*(nsample-1)*log(v)
-# z <- z - 0.5*(nsample-1)*log(v+g*sum((y-xf)^2))
-# z <- z + 0.5*(nsample-npa-1)*log(1+g)
-
-  return(z)
-}
-#' compute the g2-prior score
-#' @export
-g2.score <- function(xi, node, pa, g){
+g.score <- function(xi, node, pa, hyper){
 
   nsample <- nrow(xi)
   npa <- length(pa)
+  g <- hyper$g
+  if('a' %in% names(hyper)) a <- hyper$a
+  else a <- 0
+  if('b' %in% names(hyper)) b <- hyper$b
+  else b <- 0
 
   y <- xi[,node]
-  v <- crossprod(y-mean(y))  # y^t*y
+  v <- 2*b + crossprod(y)
   if(npa >= 1){
     xpa <- as.matrix(xi[,pa])
     xtx <- solve(crossprod(xpa))
     fit <- xtx %*% crossprod(xpa,y)
     v <- v - g/(1+g)*crossprod(xpa %*% fit)
   }
-  z <- -0.5*npa*log(1+g)-0.5*nsample*log(v)
+  z <- -0.5*npa*log(1+g)-(0.5*nsample+a)*log(v)
+  z <- z + a*log(2) + lgamma(a+nsample/2) - nsample*log(pi)/2
+  if(a*b >0) z <- z + a*log(b) - lgamma(a)
 
   return(z)
 }
 
-g.score.global <- function(xi, A, g, ac=NULL, cache=NULL){
+g.score.global <- function(xi, A, hyper, ac=NULL, cache=NULL){
 
   nodes <- colnames(A)
   llk <- 0
   for(w in nodes){
     pa <- nodes[which(A[,w]!=0)]
     if(is.null(cache))
-      llk <- llk + g.score(xi=xi, node=w, pa=pa, g=g)
+      llk <- llk + g.score(xi=xi, node=w, pa=pa, hyper=hyperb )
     else{
       z <- apply(ac,2,function(x){sum(x!=A[,w])})
       k <- which(z==0)
@@ -62,25 +43,8 @@ g.score.global <- function(xi, A, g, ac=NULL, cache=NULL){
   return(llk)
 }
 
-g2.score.global <- function(xi, A, g, ac=NULL, cache=NULL){
 
-  nodes <- colnames(A)
-  llk <- 0
-  for(w in nodes){
-    pa <- nodes[which(A[,w]!=0)]
-    if(is.null(cache))
-      llk <- llk + g2.score(xi=xi, node=w, pa=pa, g=g)
-    else{
-      z <- apply(ac,2,function(x){sum(x!=A[,w])})
-      k <- which(z==0)
-      llk <- llk + cache[w,k]
-    }
-  }
-
-  return(llk)
-}
-
-#' compute the g2-prior score
+#' Compute the diagonal prior score
 #' @export
 diag.score <- function(xi, node, pa, hyper){
 

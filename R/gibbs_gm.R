@@ -1,13 +1,13 @@
 # Partition parent sets using GM algorithm
 #
-partition.pset <- function(A, xi, q, ac, path, kappa=3, cache,
+partition.pset <- function(A, xi, q, W, ac, path, kappa=3, cache,
                            progress.bar=FALSE, ncores=1, useC=FALSE){
 
   p <- nrow(A)
   nodes <- rownames(A)
   Ag <- A
   Cgbar <- path
-  W <- sample(nodes,size=q)
+
   for(w in W)
     for(k in nodes[which(Ag[,w]>0)])   # remove edge k -> w
       Cgbar <- Cgbar - outer(Cgbar[,k],Cgbar[w,],'*')

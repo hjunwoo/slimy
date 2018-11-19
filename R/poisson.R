@@ -8,12 +8,12 @@ pois_stat <- function(yi){
 
   alpha <- colMeans(yi)   # sample mean
   v <- cov(yi)            # covariance matrix
-# sigma <- 1 + v/outer(alpha,alpha,'*')
-#  sigma <- log(sigma)
-#  mu <- log(alpha) - diag(sigma)/2
-  sigma <- log(1 + (diag(v)-alpha)/alpha^2)
-  mu <- log(alpha) - sigma/2
-  names(mu) <- names(sigma) <- nodes
+  sigma <- 1 + v/outer(alpha,alpha,'*')
+  sigma <- log(sigma)
+  sigma <- Matrix::nearPD(x=sigma)$mat # nearest positive definite mat
+  sigma <- as.matrix(sigma)
+  mu <- log(alpha) - diag(sigma)/2
+  names(mu) <- colnames(sigma) <- rownames(sigma) <- nodes
   x <- list(mu=mu, sigma=sigma)
 
   return(x)
@@ -23,12 +23,12 @@ pois.score <- function(ci, xi, node, pa, hyper, po){
 
     nsample <- nrow(ci)
     y <- xi[,node]
-    v <- 2*hyper$b + crossprod(y)
+    v <- 2*hyper$b + crossprod(y-mean(y))  # y^t*y
     npa <- length(pa)
     if(npa > 0){
       xpa <- as.matrix(xi[,pa])
       xtx <- solve(diag(npa)+hyper$v*crossprod(xpa))
-      xy <- crossprod(xpa,y)
+      xy <- crossprod(xpa,y-mean(y))
       v <- v - hyper$v*t(xy) %*% xtx %*% xy
     }
     z <- -(0.5*nsample+hyper$a)*log(v)
@@ -42,20 +42,47 @@ pois.score <- function(ci, xi, node, pa, hyper, po){
     return(score)
 }
 
+update.field <- function(object, W, hyper, po, A, update.n,
+                         useC=TRUE){
+
+  if(useC){
+    ci <- object@data
+    xi <- object@latent.var
+    nodes <- object@nodes
+    w <- match(W, nodes)-1   # node ID
+    dmax <- c(5)
+    dy <- c(0.1)
+    update.n <- c(update.n)
+    seed <- c(runif(n=1, max=1000))
+    xi2 <- update_field(ci, xi, w, hyper, po, A, dmax, dy, update.n,
+                        seed)
+    colnames(xi2) <- nodes
+    object@latent.var <- xi2
+  }
+  else
+    object <- update_fieldR(object=object, W=W, po=po, A=A,
+                            update.n=update.n)
+
+  return(object)
+}
+
 # sample and update latent field xi
-update.field <- function(ci, xi, hyper, po, A, dmax=5, dy=0.01){
+update_fieldR <- function(object, W, po, A, dmax=5, dy=0.1,
+                         update.n){
+
+  ci <- object@data
+  xi <- object@latent.var
 
   nsample <- nrow(ci)
   nodes <- colnames(ci)
   p <- ncol(ci)
   grid.y <- seq(-dmax,dmax,by=dy)
 
-  for(w in nodes){
+  for(w in W){
     pa <- nodes[which(A[,w]==1)]
     npa <- length(pa)
     yx <- xi[,w]
-#    for(k in seq_len(nsample)){
-    for(k in sample(nsample,size=10)){
+    for(k in sample(nsample,size=update.n)){
       prob <- NULL
       for(y in grid.y){
         yx[k] <- y
@@ -66,13 +93,12 @@ update.field <- function(ci, xi, hyper, po, A, dmax=5, dy=0.01){
           xy <- crossprod(xpa,yx)
           v <- v - hyper$v*t(xy) %*% xtx %*% xy
         }
-        if(v<=0) browser()
         z <- -(0.5*nsample+hyper$a)*log(v)
         if(npa>0)
           z <- z + 0.5*determinant(xtx,log=TRUE)$modulus
         m <- po$mu[w]
-        s <- po$sigma[w]
-        lkh <- sum((s*yx+m)*ci[,w]-exp(s*yx+m))
+        sg <- po$sigma[w]
+        lkh <- sum((sg*yx+m)*ci[,w]-exp(sg*yx+m))
         prob <- c(prob,z + lkh)
       }
       prob <- prob - max(prob)
@@ -81,9 +107,10 @@ update.field <- function(ci, xi, hyper, po, A, dmax=5, dy=0.01){
       ys <- sample(grid.y, size=1, prob=prob)
       xi[k,w] <- ys
     }
-#   print(w)
   }
-  return(xi)
+
+  object@latent.var <- xi
+  return(object)
 }
 
 pois.score.global <- function(ci, xi, A, hyper, po,
