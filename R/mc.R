@@ -65,8 +65,8 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
       xi <- object@latent.var
     else
       xi <- matrix(rnorm(n=m),nrow=m,ncol=p)
-    const <- sum(lfactorial(ci))
-    const <- const + lgamma(hyper$a+0.5) - 0.5*nsample*log(pi)
+    const <- -sum(lfactorial(ci))
+    const <- const + lgamma(hyper$a+0.5*nsample) - 0.5*nsample*log(pi)
     if(hyper$a > 0) const <- const - lgamma(hyper$a)
     if(hyper$b > 0) const <- const + hyper$a*log(2*hyper$b)
     colnames(xi) <- nodes
@@ -95,9 +95,6 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
                                po=po, A=A, dmax=dmax,dy=dy,
                                update.n=update.n, useC=useC)
         xi <- object@latent.var
-#       mu <- colMeans(xi)
-#       sg <- apply(xi,2,var)
-#       po <- list(mu=mu,sigma=sqrt(sg))
       }
       object <- local.score(object, kappa=kappa, po=po,
                            progress.bar=progress.bar,
@@ -133,7 +130,7 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
         }
         else if(type=='counts'){
           llk <- pois.score.global(ci=ci,xi=xi,A=A,hyper=hyper,
-                                   po=po, ac=ac, cache=cache)-const
+                                   po=po, ac=ac, cache=cache)+const
           if(track.field) mse <- mean(c(xi-xi0)^2)
         }
         else if(prior=='g')
