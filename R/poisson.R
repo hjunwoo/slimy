@@ -24,13 +24,11 @@ pois.score <- function(ci, xi, node, pa, hyper, po){
 
     nsample <- nrow(ci)
     y <- xi[,node]
-#    v <- 2*hyper$b + crossprod(y-mean(y))  # y^t*y
     v <- 2*hyper$b + crossprod(y)  # y^t*y
     npa <- length(pa)
     if(npa > 0){
       xpa <- as.matrix(xi[,pa])
       xtx <- solve(diag(npa)+hyper$v*crossprod(xpa))
-#      xy <- crossprod(xpa,y-mean(y))
       xy <- crossprod(xpa,y)
       v <- v - hyper$v*t(xy) %*% xtx %*% xy
     }
@@ -41,7 +39,8 @@ pois.score <- function(ci, xi, node, pa, hyper, po){
     m <- po$mu[node]
     sg <- po$sigma[node]
 
-    score <- z + sum((sg*y+m)*ci[,node]-exp(sg*y+m))
+#   score <- z + sum((sg*y+m)*ci[,node]-exp(sg*y+m))
+    score <- z + sum((sg*y+m)*(ci[,node]-1)-exp(sg*y+m))
 
     return(score)
 }
