@@ -21,7 +21,6 @@ parent.sets <- function(nodes, kappa=3){
 local.score <- function(object, kappa, po=NULL, progress.bar, ncores){
 
   nodes <- object@nodes
-  xi <- object@data
   p <- length(nodes)
   ac <- object@ac
   cache <- matrix(0, nrow=p, ncol=ncol(ac))
@@ -72,7 +71,7 @@ fill.cache <- function(iac, bundle){
   nodes <- object@nodes
   p <- length(nodes)
   type <- object@data.type
-  if(type=='counts'){
+  if(type %in% c('counts','mvln')){
     ci <- object@data
     xi <- object@latent.var
   }
@@ -93,7 +92,8 @@ fill.cache <- function(iac, bundle){
       if(!is.DAG(A)) sc <- NA
       else{
         if(type=='discrete') sc <-
-            multinom.local.score(xi, w, pa, prior=prior, hyper=hyper)
+            multinom.local.score(xi, w, pa, prior=prior,
+                                 hyper=hyper)
         else if(type=='counts')
           sc <- pois.score(ci=ci,xi=xi,node=w, pa=pa, hyper=hyper,
                            po=po)

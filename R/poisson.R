@@ -13,6 +13,7 @@ pois_stat <- function(yi){
   sigma <- Matrix::nearPD(x=sigma)$mat # nearest positive definite mat
   sigma <- as.matrix(sigma)
   mu <- log(alpha) - diag(sigma)/2
+
   names(mu) <- colnames(sigma) <- rownames(sigma) <- nodes
   x <- list(mu=mu, sigma=sigma)
 
@@ -23,12 +24,14 @@ pois.score <- function(ci, xi, node, pa, hyper, po){
 
     nsample <- nrow(ci)
     y <- xi[,node]
-    v <- 2*hyper$b + crossprod(y-mean(y))  # y^t*y
+#    v <- 2*hyper$b + crossprod(y-mean(y))  # y^t*y
+    v <- 2*hyper$b + crossprod(y)  # y^t*y
     npa <- length(pa)
     if(npa > 0){
       xpa <- as.matrix(xi[,pa])
       xtx <- solve(diag(npa)+hyper$v*crossprod(xpa))
-      xy <- crossprod(xpa,y-mean(y))
+#      xy <- crossprod(xpa,y-mean(y))
+      xy <- crossprod(xpa,y)
       v <- v - hyper$v*t(xy) %*% xtx %*% xy
     }
     z <- -(0.5*nsample+hyper$a)*log(v)
@@ -37,21 +40,23 @@ pois.score <- function(ci, xi, node, pa, hyper, po){
 
     m <- po$mu[node]
     sg <- po$sigma[node]
+
     score <- z + sum((sg*y+m)*ci[,node]-exp(sg*y+m))
 
     return(score)
 }
 
 update.field <- function(object, W, hyper, po, A, update.n,
-                         useC=TRUE){
+                         dmax,dy, useC=TRUE){
+
+  if(is.null(update.n)) update.n <- object@nsample
+  else update.n <- min(update.n, object@nsample)
 
   if(useC){
     ci <- object@data
     xi <- object@latent.var
     nodes <- object@nodes
     w <- match(W, nodes)-1   # node ID
-    dmax <- c(5)
-    dy <- c(0.1)
     update.n <- c(update.n)
     seed <- c(runif(n=1, max=1000))
     xi2 <- update_field(ci, xi, w, hyper, po, A, dmax, dy, update.n,
@@ -67,7 +72,7 @@ update.field <- function(object, W, hyper, po, A, update.n,
 }
 
 # sample and update latent field xi
-update_fieldR <- function(object, W, po, A, dmax=5, dy=0.1,
+update_fieldR <- function(object, W, po, A, dmax=3, dy=0.01,
                          update.n){
 
   ci <- object@data

@@ -65,6 +65,14 @@ slimySet <- function(data.type, data, ref.dag=NULL, hyper=NULL){
   if(is.null(hyper)) x@hyper <- list()
   else x@hyper <- hyper
 
+  if(data.type=='mvln'){
+    musig <- pois_stat(data)
+    mu <- musig$mu
+    sig <- diag(musig$sigma)
+    xi <- (log(1+data) - mu)/sig
+    x@latent.var <- xi
+  }
+
   return(x)
 }
 

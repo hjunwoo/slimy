@@ -18,8 +18,10 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
                       kappa=NULL,
                       progress.bar=FALSE, burn.in=100, map=FALSE,
                       q=2, npr=100, nplot=npr, nprime=1,attrs=NULL,
-                      init.deg=2, frq.update=1,
-                      ncores=1, update.n=100, useC=TRUE){
+                      init.deg=2, frq.update=1, track.field=FALSE,
+                      dmax=3,dy=0.01, init='sample',
+                      pois=NULL,
+                      ncores=1, update.n=NULL, useC=TRUE){
 
   type <- object@data.type
   if(burn.in >= nstep) burn.in <- nstep-1
@@ -39,6 +41,7 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
   colnames(A) <- nodes
 
   ref <- object@ref.dag
+  if(type=='mvln') xi <- object@latent.var
 
   sumd <- 0
   cnt <- 0
@@ -53,14 +56,24 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
   if(type=='counts'){
     ci <- object@data
     po <- pois_stat(yi=ci)
-    xi <- MASS::mvrnorm(n=nsample, mu=po$mu, Sigma=po$sigma)
+    if(track.field) xi0 <- object@latent.var  # reference field
+    s0 <- sqrt(diag(po$sigma))
+    sg <- po$sigma/outer(s0,s0,'*')
+    if(init=='sample')
+      xi <- MASS::mvrnorm(n=m, mu=rep(0,p), Sigma=sg)
+    else if(init=='input')
+      xi <- object@latent.var
+    else
+      xi <- matrix(rnorm(n=m),nrow=m,ncol=p)
     const <- sum(lfactorial(ci))
     const <- const + lgamma(hyper$a+0.5) - 0.5*nsample*log(pi)
     if(hyper$a > 0) const <- const - lgamma(hyper$a)
     if(hyper$b > 0) const <- const + hyper$a*log(2*hyper$b)
     colnames(xi) <- nodes
     object@latent.var <- xi
-    po$sigma <- diag(po$sigma)
+    po$sigma <- sqrt(diag(po$sigma))
+    if(!is.null(pois))
+      po <- pois
   }
   else if(sum(dim(cache))==0) # score absent
     cache <- local.score(object, kappa=kappa,
@@ -77,17 +90,22 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
 
     W <- sample(nodes,size=q)
     if(type=='counts'){
-      if(istep %% frq.update==0)
+      if(frq.update > 0) if(istep %% frq.update==0){
         object <- update.field(object, W=W, hyper=hyper,
-                               po=po, A=A,
+                               po=po, A=A, dmax=dmax,dy=dy,
                                update.n=update.n, useC=useC)
+        xi <- object@latent.var
+#       mu <- colMeans(xi)
+#       sg <- apply(xi,2,var)
+#       po <- list(mu=mu,sigma=sqrt(sg))
+      }
       object <- local.score(object, kappa=kappa, po=po,
                            progress.bar=progress.bar,
                            ncores=ncores)
       cache <- object@cache
     }
 
-    Pawgh <- partition.pset(A=A, xi=xi, q=q, W=W, ac=ac, path=path,
+    Pawgh <- partition.pset(A=A, q=q, W=W, ac=ac, path=path,
                       kappa=kappa,cache=cache,
                       progress.bar=progress.bar,
                       ncores=ncores)
@@ -113,9 +131,11 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
           else
             llk <- multinom.cache.score(dag=ddag, ac, cache)
         }
-        else if(type=='counts')
+        else if(type=='counts'){
           llk <- pois.score.global(ci=ci,xi=xi,A=A,hyper=hyper,
                                    po=po, ac=ac, cache=cache)-const
+          if(track.field) mse <- mean(c(xi-xi0)^2)
+        }
         else if(prior=='g')
           llk <- g.score.global(xi=xi, A=A, hyper=hyper,
                                 ac=ac, cache=cache)
@@ -124,17 +144,22 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
                                    cache=cache)
         else stop('Unknown type/prior')
 
-        cat('istep = ',istep,', log LK = ',llk/m/p,', mean distance = ',
-            sumd/cnt,'\n',sep='')
-        if(istep %% nplot==0){
-          if(!is.null(attrs)){
-            plot(ref, main='True',attrs=attrs)
-            plot(graphAM(adjMat=A,edgemode='directed'),
+        cat('istep = ',istep,', log LK = ',llk/m/p,
+            ', mean distance = ', sumd/cnt,sep='')
+        if(type=='counts' & track.field)
+          cat(', MSE(field) = ', mse, sep='')
+        cat('\n')
+        if(nplot>0){
+          if(istep %% nplot==0){
+            if(!is.null(attrs)){
+              plot(ref, main='True',attrs=attrs)
+              plot(graphAM(adjMat=A,edgemode='directed'),
                  main=paste0('Distance=',d),attrs=attrs)
-          }else{
-            plot(ref, main='True')
-            plot(graphAM(adjMat=A,edgemode='directed'),
+            }else{
+              plot(ref, main='True')
+              plot(graphAM(adjMat=A,edgemode='directed'),
                  main=paste0('Distance=',d))
+            }
           }
         }
         sumd <- cnt <- 0
@@ -187,15 +212,18 @@ neighbor <- function(A){
 #' Enumerate and store local scores of all parent sets
 #' @export
 
-compute.score <- function(object=NULL, kappa=3, prior='g', hyper=NULL,
-                          progress.bar=TRUE, ncores=1){
+compute.score <- function(object=NULL, kappa=3, prior='g',
+                          hyper=NULL, progress.bar=TRUE,
+                          ncores=1){
 
   object@kappa <- kappa
-  object@ac <- parent.sets(nodes=colnames(xi), kappa)
+  object@ac <- parent.sets(nodes=object@nodes, kappa)
   object@prior <- prior
   if(!is.null(hyper)) object@hyper <- hyper
-  object <- local.score(object, kappa=kappa, progress.bar=progress.bar,
-                       ncores=ncores)
+
+  object <- local.score(object, kappa=kappa,
+                        progress.bar=progress.bar,
+                        ncores=ncores)
 
   return(object)
 }

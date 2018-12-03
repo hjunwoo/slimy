@@ -22,7 +22,8 @@ double sample(const std::vector<double> &gridy, const std::vector<double> &prob,
 //
 // [[Rcpp::depends(RcppEigen)]]
 // [[Rcpp::export]]
-Eigen::MatrixXd update_field(const Eigen::MatrixXd &ci, const Eigen::MatrixXd &xi,
+Eigen::MatrixXd update_field(const Eigen::MatrixXd &ci,
+                             const Eigen::MatrixXd &xi,
       const Rcpp::IntegerVector &W, const Rcpp::List &hyper,
       const Rcpp::List &po,
       const Eigen::MatrixXd &A, const Rcpp::NumericVector &dmax,

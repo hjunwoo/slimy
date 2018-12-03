@@ -1,6 +1,6 @@
 # Partition parent sets using GM algorithm
 #
-partition.pset <- function(A, xi, q, W, ac, path, kappa=3, cache,
+partition.pset <- function(A, q, W, ac, path, kappa=3, cache,
                            progress.bar=FALSE, ncores=1, useC=FALSE){
 
   p <- nrow(A)
