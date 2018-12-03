@@ -130,7 +130,7 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
         }
         else if(type=='counts'){
           llk <- pois.score.global(ci=ci,xi=xi,A=A,hyper=hyper,
-                                   po=po, ac=ac, cache=cache)+const
+                                   po=po, ac=ac)+const
           if(track.field) mse <- mean(c(xi-xi0)^2)
         }
         else if(prior=='g')

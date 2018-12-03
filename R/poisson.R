@@ -39,8 +39,7 @@ pois.score <- function(ci, xi, node, pa, hyper, po){
     m <- po$mu[node]
     sg <- po$sigma[node]
 
-#   score <- z + sum((sg*y+m)*ci[,node]-exp(sg*y+m))
-    score <- z + sum((sg*y+m)*(ci[,node]-1)-exp(sg*y+m))
+    score <- z + sum((sg*y+m)*ci[,node]-exp(sg*y+m))
 
     return(score)
 }
@@ -117,22 +116,15 @@ update_fieldR <- function(object, W, po, A, dmax=3, dy=0.01,
   return(object)
 }
 
-pois.score.global <- function(ci, xi, A, hyper, po,
-                              ac=NULL, cache=NULL){
+pois.score.global <- function(ci, xi, A, hyper, po, ac){
 
   nodes <- colnames(A)
   llk <- 0
+  llk2 <- 0
   for(w in nodes){
     pa <- nodes[which(A[,w]!=0)]
-    if(is.null(cache))
-      llk <- llk + pois.score(ci=ci,xi=xi, node=w, pa=pa, hyper=hyper,
+    llk <- llk + pois.score(ci=ci,xi=xi, node=w, pa=pa, hyper=hyper,
                               po=po)
-    else{
-      z <- apply(ac,2,function(x){sum(x!=A[,w])})
-      k <- which(z==0)
-      llk <- llk + cache[w,k]
-    }
   }
-
   return(llk)
 }
