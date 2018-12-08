@@ -1,7 +1,7 @@
 Package: slimy
 Type: Package
 Title: slimy: (Monte Carlo) SampLIng-based Method for causalitY
-Version: 0.5.0
+Version: 0.6.0
 Authors: Jun Woo [aut, cre], Sisi Ma [aut]
 Maintainer: Jun Woo <jwoo@umn.edu>
 Depends: R (>= 3.5.0),

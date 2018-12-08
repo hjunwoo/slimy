@@ -18,10 +18,11 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
                       kappa=NULL,
                       progress.bar=FALSE, burn.in=100, map=FALSE,
                       q=2, npr=100, nplot=npr, nprime=1,attrs=NULL,
-                      init.deg=2, frq.update=1, track.field=FALSE,
-                      dmax=3,dy=0.01, init='sample',
+                      xupdate='metro', nmetro=1,
+                      init.deg=2, frq.update=1, ref.field=NULL,
+                      dmax=3,dy=NULL, init='sample',
                       pois=NULL,
-                      ncores=1, update.n=NULL, useC=TRUE){
+                      ncores=1, update.n=NULL, useC=FALSE){
 
   type <- object@data.type
   if(burn.in >= nstep) burn.in <- nstep-1
@@ -31,9 +32,16 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
   if(is.null(kappa)) kappa <- object@kappa
   prior <- object@prior
   hyper <- object@hyper
+  track.field <- !is.null(ref.field)
+
+  if(is.null(dy)){
+    if(xupdate=='metro') dy <- 1
+    else dy <- 0.01
+  }
 
   discrete <- type=='discrete'
-  if(is.null(init.dag))   # initial graph
+  if(!is.null(init.dag)) dag <- init.dag
+  else   # initial graph
     dag <- rgraph(nodes=nodes, discrete=discrete,
                        mean.degree=init.deg, max.degree=kappa)
   A <- as(dag,'matrix')
@@ -56,7 +64,8 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
   if(type=='counts'){
     ci <- object@data
     po <- pois_stat(yi=ci)
-    if(track.field) xi0 <- object@latent.var  # reference field
+    if(track.field)
+      xi0 <- ref.field  # reference field
     s0 <- sqrt(diag(po$sigma))
     sg <- po$sigma/outer(s0,s0,'*')
     if(init=='sample')
@@ -91,9 +100,12 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
     W <- sample(nodes,size=q)
     if(type=='counts'){
       if(frq.update > 0) if(istep %% frq.update==0){
-        object <- update.field(object, W=W, hyper=hyper,
+        for(k in seq_len(nmetro)){
+          object <- update.field(object, W=W, hyper=hyper,
                                po=po, A=A, dmax=dmax,dy=dy,
+                               xupdate=xupdate,
                                update.n=update.n, useC=useC)
+        }
         xi <- object@latent.var
       }
       object <- local.score(object, kappa=kappa, po=po,
@@ -165,7 +177,7 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
           edge.prob <- edge.prob + A
           if(is.null(Map))
             Map <- list(dag=ddag, score=llk/m/p)
-          else if(llk > Map$score)
+          else if(llk/m/p > Map$score)
             Map <- list(dag=ddag, score=llk/m/p)
           Elm <- c(Elm, llk)
         }
@@ -181,7 +193,7 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
   edge.prob <- edge.prob/iburned
   object@edge.prob <- edge.prob
   object@map <- Map
-  object@mlk <- llk/m/p
+  object@mlk <- as.numeric(llk)/m/p
   object@ac <- ac
   object@cache <- cache
   object@emlk <- Elm

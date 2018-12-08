@@ -26,9 +26,29 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// update_metro
+Eigen::MatrixXd update_metro(const Eigen::MatrixXd& ci, const Eigen::MatrixXd& xi, const Rcpp::IntegerVector& W, const Rcpp::List& hyper, const Rcpp::List& po, const Eigen::MatrixXd& A, const Rcpp::NumericVector& dy, const Rcpp::IntegerVector& updaten, const Rcpp::IntegerVector& seed);
+RcppExport SEXP _slimy_update_metro(SEXP ciSEXP, SEXP xiSEXP, SEXP WSEXP, SEXP hyperSEXP, SEXP poSEXP, SEXP ASEXP, SEXP dySEXP, SEXP updatenSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type ci(ciSEXP);
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type xi(xiSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type W(WSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type hyper(hyperSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type po(poSEXP);
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type A(ASEXP);
+    Rcpp::traits::input_parameter< const Rcpp::NumericVector& >::type dy(dySEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type updaten(updatenSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(update_metro(ci, xi, W, hyper, po, A, dy, updaten, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_slimy_update_field", (DL_FUNC) &_slimy_update_field, 10},
+    {"_slimy_update_metro", (DL_FUNC) &_slimy_update_metro, 9},
     {NULL, NULL, 0}
 };
 

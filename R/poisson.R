@@ -44,7 +44,8 @@ pois.score <- function(ci, xi, node, pa, hyper, po){
     return(score)
 }
 
-update.field <- function(object, W, hyper, po, A, update.n,
+update.field <- function(object, W, hyper, po, A, xupdate,
+                         update.n,
                          dmax,dy, useC=TRUE){
 
   if(is.null(update.n)) update.n <- object@nsample
@@ -57,21 +58,27 @@ update.field <- function(object, W, hyper, po, A, update.n,
     w <- match(W, nodes)-1   # node ID
     update.n <- c(update.n)
     seed <- c(runif(n=1, max=1000))
-    xi2 <- update_field(ci, xi, w, hyper, po, A, dmax, dy, update.n,
-                        seed)
+    if(xupdate=='gibbs')
+      xi2 <- update_field(ci, xi, w, hyper, po, A, dmax, dy,
+                          update.n, seed)
+    else # Metropolis
+      xi2 <- update_metro(ci, xi, w, hyper, po, A, dy,
+                          update.n, seed)
     colnames(xi2) <- nodes
     object@latent.var <- xi2
   }
   else
-    object <- update_fieldR(object=object, W=W, po=po, A=A,
+    object <- update_fieldR(object=object, hyper=hyper,
+                            W=W, po=po, A=A,
+                            dmax=dmax, dy=dy, xupdate=xupdate,
                             update.n=update.n)
 
   return(object)
 }
 
 # sample and update latent field xi
-update_fieldR <- function(object, W, po, A, dmax=3, dy=0.01,
-                         update.n){
+update_fieldR <- function(object, hyper, W, po, A, dmax=3, dy=0.01,
+                          xupdate, update.n){
 
   ci <- object@data
   xi <- object@latent.var
@@ -85,35 +92,68 @@ update_fieldR <- function(object, W, po, A, dmax=3, dy=0.01,
     pa <- nodes[which(A[,w]==1)]
     npa <- length(pa)
     yx <- xi[,w]
+    xpa <- as.matrix(xi[,pa])
+    if(npa>0)
+      xtx <- solve(diag(npa)+hyper$v*crossprod(xpa))
+    else xtx <- NULL
+    m=po$mu[w]
+    sg=po$sig[w]
+    cw=ci[,w]
     for(k in sample(nsample,size=update.n)){
-      prob <- NULL
-      for(y in grid.y){
-        yx[k] <- y
-        v <- 2*hyper$b + crossprod(yx)
-        if(npa > 0){
-          xpa <- as.matrix(xi[,pa])
-          xtx <- solve(diag(npa)+hyper$v*crossprod(xpa))
-          xy <- crossprod(xpa,yx)
-          v <- v - hyper$v*t(xy) %*% xtx %*% xy
+      if(xupdate=='gibbs'){
+        prob <- NULL
+        for(y in grid.y){
+          yx[k] <- y
+          x <- zprob(yx=yx,hyper=hyper,xpa=xpa,xtx=xtx,nsample=nsample,
+                       cw=cw,m=m,sg=sg)
+          prob <- c(prob,x)
         }
-        z <- -(0.5*nsample+hyper$a)*log(v)
-        if(npa>0)
-          z <- z + 0.5*determinant(xtx,log=TRUE)$modulus
-        m <- po$mu[w]
-        sg <- po$sigma[w]
-        lkh <- sum((sg*yx+m)*ci[,w]-exp(sg*yx+m))
-        prob <- c(prob,z + lkh)
+        prob <- prob - max(prob)
+        prob <- exp(prob)
+        prob <- prob/sum(prob)
+        ys <- sample(grid.y, size=1, prob=prob)
+        xi[k,w] <- ys
       }
-      prob <- prob - max(prob)
-      prob <- exp(prob)
-      prob <- prob/sum(prob)
-      ys <- sample(grid.y, size=1, prob=prob)
-      xi[k,w] <- ys
+      else{    # Metropolis-Hastings
+        x0 <- zprob(yx=yx,hyper=hyper,xpa=xpa,xtx=xtx,nsample=nsample,
+                    cw=cw,m=m,sg=sg)
+        delta <- rnorm(n=1,mean=0, sd=dy)
+        yx[k] <- yx[k] + delta
+        x1 <- zprob(yx=yx,hyper=hyper,xpa=xpa,xtx=xtx,nsample=nsample,
+                    cw=cw,m=m,sg=sg)
+        accept <- FALSE
+        if(x1>x0) accept <- TRUE
+        else{
+          prob <- exp(x1-x0)
+          if(prob>runif(n=1)) accep <- TRUE
+        }
+        if(accept)
+          xi[k,w] <- yx[k]
+        else
+          yx[k] <- yx[k] - delta
+      }
     }
   }
 
   object@latent.var <- xi
   return(object)
+}
+
+zprob <- function(yx,hyper,xpa,xtx,nsample,cw,m,sg){
+
+  v <- 2*hyper$b + crossprod(yx)
+  npa <- ncol(xpa)
+  if(npa>0){
+    xy <- crossprod(xpa,yx)
+    v <- v - hyper$v*t(xy) %*% xtx %*% xy
+  }
+  z <- -(0.5*nsample+hyper$a)*log(v)
+  if(npa>0)
+    z <- z + 0.5*determinant(xtx,log=TRUE)$modulus
+  lkh <- sum((sg*yx+m)*cw-exp(sg*yx+m))
+  x <- as.numeric(z + lkh)
+
+  return(x)
 }
 
 pois.score.global <- function(ci, xi, A, hyper, po, ac){

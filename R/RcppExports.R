@@ -5,3 +5,7 @@ update_field <- function(ci, xi, W, hyper, po, A, dmax, dy, updaten, seed) {
     .Call('_slimy_update_field', PACKAGE = 'slimy', ci, xi, W, hyper, po, A, dmax, dy, updaten, seed)
 }
 
+update_metro <- function(ci, xi, W, hyper, po, A, dy, updaten, seed) {
+    .Call('_slimy_update_metro', PACKAGE = 'slimy', ci, xi, W, hyper, po, A, dy, updaten, seed)
+}
+
