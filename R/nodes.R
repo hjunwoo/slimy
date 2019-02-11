@@ -79,7 +79,7 @@ fill.cache <- function(iac, bundle){
 
 
   pa <- nodes[which(ac[,iac]==1)]
-  lcache <- c()
+  lcache <- double(p)
   for(i in seq_len(p)){
     w <- nodes[i]
     if(w %in% pa) sc <- NA

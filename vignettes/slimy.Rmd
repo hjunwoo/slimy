@@ -1,0 +1,152 @@
+---
+title: "slimy: (Monte Carlo) SampLIng-based Method for causalitY"
+author: ""
+date: "`r Sys.Date()`"
+output: 
+  rmarkdown::html_vignette:
+        fig_caption: yes
+bibliography: slimy.bib
+csl: nature.csl
+vignette: >
+  %\VignetteIndexEntry{ccfindR: signatures}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+The R package `slimy` implements Markov chain Monte Carlo sampling-based
+inference of causal graphs from empirical discrete or continuous data. 
+The default algorithm is Gibbs sampling with blocking schemes proposed
+by Goudie and Mukherjee (GM) [@goudie_mukherjee] using
+partitioning of parent sets for randomly selected nodes. We illustrate
+the basic usage below using random graphs and simulated data.
+
+## Installation
+
+Prerequisites of `slimy` are [`graph`](https://doi.org/doi:10.18129/B9.bioc.graph),
+[`gtools`](https://cran.r-project.org/package=gtools), 
+and [`pcalg`](https://cran.r-project.org/package=pcalg). With these packages
+present, install [`slimy`](https://github.com/packages/hjunwoo/slimy) by
+```{r,eval=FALSE}
+library(devtools)
+install_github('hjunwoo/slimy')
+```
+
+## Continuous data
+We generate a random graph of 10 nodes and treat it as an "unknown" underlying
+graph (a directed acyclic graph; DAG) from which data are generated:
+```{r, fig.cap='Fig.1: Random graph to be inferred with 10 nodes and regression coefficients for edges'}
+suppressMessages(library(slimy))
+p <- 10  # Number of nodes
+set.seed(123)
+dag <- rgraph.gauss(p=p, prob=0.2)
+dag
+plot(dag)
+```
+
+The function `rgraph.gauss` is a wrapper for `r.gauss.pardag` in `pcalg` and
+returns a graph object of class `graphAM` (adjacency matrix-based graph) defined
+in `graph` package. The argument `prob` controls the edge probability. The DAG object also contains regression coefficients corresponding to each edge.
+
+We generate simulated data from multivariate normal distributions corresponding to 
+this graph:
+```{r}
+xi <- simulate.gauss(dag=dag, nsample=5000)
+dim(xi)
+head(xi)
+```
+
+Note that the data frame has columns corresponding to each node (column names
+must match those of nodes) and each row represent a single sample.
+
+The following command performs Gibbs sampling using a random initial graph:
+```{r, fig.width=6, fig.cap='Fig.2: Comparison of true graph and DAG after 5,000 Gibbs sampling steps.'}
+par(mfrow=c(1,2))
+Gibbs <- mc.sample(xi=xi, ref=dag, discrete=FALSE, nstep=5000, 
+                   burn.in=1000, verbose=2, q=2, kappa=3, npr=1000, 
+                   nplot=5000, progress.bar=FALSE)
+```
+
+The graph after 5,000 steps shown on the right is distance 1 (number of
+edges different, disregarding directionality) from the real DAG
+(false positive edge 10-to-1). 
+The parameter `ref` is optional and is useful if a reference graph (such as
+the known true DAG in simulation runs) is available for comparison in order to
+track the progress of sampling toward the target. The parameter `discrete` is
+used to distinguish continuous and discrete data. Sampling will be performed for
+`nstep` steps in total. Each step consists of a random selection of `q` nodes
+and a two-step sampling of all parent sets of these nodes using a partitioning
+scheme designed to accelerate sampling (see Goudie & Mukherjee [@goudie_mukherjee]).
+The maximum in-degree per node is set by the parameter `kappa`. The option
+`verbose=1` will silence the outputs. Every `npr` step, intermediate statistics (log likelihood and mean distance to the reference graph) are printed. Every `nplot` step, the reference and dynamically reached graph will be plotted side-by-side.
+To speed up actual sampling, likelihood scores of graphs containing the selected nodes 
+and all possible parent sets are pre-computed and stored. The progress of this step 
+can be tracked with `progress.bar=TRUE`. Each graph is scored using maximum likelihood
+scores for regression coefficients. The normal-Wishart prior conjugate to multivariate normals [@geiger_heckerman] can also be used but results tend to be very similar.
+
+Notice a gradual overall increase in log likelihood and decrease 
+in mean distance as sampling progresses in the above output. The sampler returns a list with two components: `dag`, storing the final graph object, and `edge.prob`, the posterior probability of edges expressed in terms of the adjacency matrix:
+```{r}
+Gibbs$edge.prob
+```
+The `(i,j)` element of this matrix is the fraction of times the edge from node `i`
+to node `j` was "on", sampled every `npr` steps after discarding the first `burn.in`
+period. We construct a consensus graph using cutoff 0.5:
+```{r, fig.width=6, fig.cap='Fig.3: Comparison of true graph and consensus DAG with edges of posterior probability > 0.5.'}
+A <- apply(Gibbs$edge.prob, 1:2, function(x){as.numeric(x>0.5)})
+pdag <- graph::graphAM(adjMat=A, edgemode='directed')
+par(mfrow=c(1,2))
+plot(dag, main='True')
+plot(pdag, main='Posterior 50%')
+```
+
+## Discrete data
+Discrete data sets are treated similarly. We perform an inference below for  
+discrete data from a graph with 12 nodes:
+```{r}
+p <- 12
+set.seed(2)
+nodes <- as.character(1:p)
+dag <- rgraph(nodes=nodes, mean.degree=1.5, alpha=c(1,1), max.degree=3)
+dag
+
+xi <- simulate.data(dag=dag, nsample=10000)
+head(xi)
+
+par(mfrow=c(1,2))
+Gibbs <- mc.sample(xi=xi, ref=dag, discrete=TRUE, nstep=20000, verbose=2,
+                   progress.bar=FALSE, burn.in=1000, npr=1000, nplot=30000, q=2, kappa=3)
+```
+
+The function `rgraph` generates a random graph with `nodes` and `mean.degree` per node
+(capped by `max.degree`). Parameters for discrete data are specified by conditional
+probabilities of each node given its parent nodes, as well as marginals for nodes 
+without parents. These probabilities are sampled from Dirichlet distribution using
+hyperparameter `alpha`. The length of `alpha` fixes the dimension of each discrete variable
+(number of levels for factor variable; binary above). Larger magnitudes of `alpha` lead to
+larger variances in probability. 
+
+Although discrete data `xi` above are all binary, factors with 
+varying number of levels for each variable in real data sets can also be 
+used as input to `mc.sample`. Scoring uses the Dirichlet prior conjugate to multinomials
+with a uniform hyperparameter of prior count 1 [@heckerman_geiger_chickering].
+The local score computation above will take about 5 min; 
+turn on the option `progress.bar=TRUE` to track this step.
+
+```{r, fig.width=6, fig.cap='Fig.5: True graph and posterior 50% DAG for discrete data.'}
+A <- apply(Gibbs$edge.prob, 1:2, function(x){as.numeric(x>0.5)})
+pdag <- graph::graphAM(adjMat=A, edgemode='directed')
+par(mfrow=c(1,2))
+plot(dag, main='True')
+plot(pdag, main='Posterior 50%')
+```
+
+The posterior edge graph above again agrees well with true graph.
+
+##References

@@ -99,14 +99,15 @@ update_fieldR <- function(object, hyper, W, po, A, dmax=3, dy=0.01,
     m=po$mu[w]
     sg=po$sig[w]
     cw=ci[,w]
+
     for(k in sample(nsample,size=update.n)){
       if(xupdate=='gibbs'){
-        prob <- NULL
-        for(y in grid.y){
-          yx[k] <- y
+        prob <- double(length(grid.y))
+        for(i in seq_len(grid.y)){
+          yx[k] <- grid.y[i]
           x <- zprob(yx=yx,hyper=hyper,xpa=xpa,xtx=xtx,nsample=nsample,
                        cw=cw,m=m,sg=sg)
-          prob <- c(prob,x)
+          prob[i] <- x
         }
         prob <- prob - max(prob)
         prob <- exp(prob)

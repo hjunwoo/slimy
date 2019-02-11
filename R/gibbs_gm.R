@@ -53,11 +53,12 @@ partition.pset <- function(A, q, W, ac, path, kappa=3, cache,
 
   Pawgh <- list()   # list of parent sets of w partitioned into H
   eta <- 0          # partition count
-  KH <- NULL
-  for(z in hgraph){
+  KH <- double(length(hgraph))
+  for(i in seq_along(hgraph)){
+    z <- hgraph[[i]]
     eta <- eta + 1
     Pawgh[[eta]] <- z$Pawgh
-    KH <- c(KH, z$kh)
+    KH[i] <- z$kh
   }
   KH <- KH - max(KH)
 
@@ -119,10 +120,11 @@ h.graph <- function(m, bundle){
       pawgh <- pawB[!(pawB %in% pawA)]  # these are column indices of ac
 
     Pawgh[[w]] <- pawgh
-    sc <- NULL
-    for(i in pawgh){
+    sc <- double(length(pawgh))
+    for(j in seq_along(pawgh)){
+      i <- pawgh[j]
       e <- cache[w,i]
-      sc <- c(sc, e)
+      sc[j] <- e
     }
     lsc <- log(sum(exp(sc-max(sc)))) + max(sc)
     lkh <- lkh + lsc

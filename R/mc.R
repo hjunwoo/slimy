@@ -21,7 +21,7 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
                       xupdate='metro', nmetro=1,
                       init.deg=2, frq.update=1, ref.field=NULL,
                       dmax=3,dy=NULL, init='sample',
-                      pois=NULL,
+                      pois=NULL, log.file=NULL,
                       ncores=1, update.n=NULL, useC=FALSE){
 
   type <- object@data.type
@@ -39,6 +39,9 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
     else dy <- 0.01
   }
 
+  if(!is.null(log.file))
+    lfile <- file(log.file,'w')
+
   discrete <- type=='discrete'
   if(!is.null(init.dag)) dag <- init.dag
   else   # initial graph
@@ -49,6 +52,8 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
   colnames(A) <- nodes
 
   ref <- object@ref.dag
+  is.ref <- length(nodes(ref))==p  # ref. graph provided
+
   if(type=='mvln') xi <- object@latent.var
 
   sumd <- 0
@@ -75,7 +80,7 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
     else
       xi <- matrix(rnorm(n=m),nrow=m,ncol=p)
     const <- -sum(lfactorial(ci))
-    const <- const + lgamma(hyper$a+0.5*nsample) - 0.5*nsample*log(pi)
+    const <- const + lgamma(hyper$a+0.5*m) - 0.5*m*log(pi)
     if(hyper$a > 0) const <- const - lgamma(hyper$a)
     if(hyper$b > 0) const <- const + hyper$a*log(2*hyper$b)
     colnames(xi) <- nodes
@@ -126,7 +131,7 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
     istep <- istep + 1
 
     if(verbose>=2){
-      if(!sum(dim((ref@adjMat)))==0){
+      if(is.ref){
         d <- distance(m=A, mref=as(ref,'matrix'))
         sumd <- sumd + d
       }
@@ -153,21 +158,44 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
                                    cache=cache)
         else stop('Unknown type/prior')
 
-        cat('istep = ',istep,', log LK = ',llk/m/p,
-            ', mean distance = ', sumd/cnt,sep='')
-        if(type=='counts' & track.field)
-          cat(', MSE(field) = ', mse, sep='')
+        cat('istep = ',istep,', log LK = ',llk/m/p, sep='')
+        if(!is.null(log.file))
+          cat(istep, llk/m/p,sep=' ',file=lfile)
+        if(is.ref){
+          cat(', mean distance = ', sumd/cnt,sep='')
+          if(!is.null(log.file))
+            cat(sumd/cnt, sep=' ',file=lfile)
+          if(type=='counts' & track.field){
+            cat(', MSE(field) = ', mse, sep='')
+            if(!is.null(log.file))
+              cat(mse, sep=' ',file=lfile)
+          }
+        }
         cat('\n')
+        if(!is.null(log.file)){
+          cat('\n',file=lfile)
+          flush(lfile)
+        }
+
         if(nplot>0){
           if(istep %% nplot==0){
             if(!is.null(attrs)){
-              plot(ref, main='True',attrs=attrs)
+              if(is.ref){
+                main=paste0('Distance=',d)
+                plot(ref, main='True',attrs=attrs)
+              }else{
+                main=''
+              }
               plot(graphAM(adjMat=A,edgemode='directed'),
-                 main=paste0('Distance=',d),attrs=attrs)
+                main=main,attrs=attrs)
             }else{
-              plot(ref, main='True')
+              if(is.ref){
+                plot(ref, main='True')
+                main=paste0('Distance=',d)
+              }
+              else main=''
               plot(graphAM(adjMat=A,edgemode='directed'),
-                 main=paste0('Distance=',d))
+                 main=main)
             }
           }
         }
@@ -198,6 +226,7 @@ mc.sample <- function(object, init.dag=NULL, nstep=1000, verbose=3,
   object@cache <- cache
   object@emlk <- Elm
 
+  if(!is.null(log.file)) close(lfile)
   return(object)
 }
 
@@ -248,18 +277,21 @@ sample.subgraph <- function(A, Pawgh, ac, cache,path){
 
   pah <- Pawgh$PaH[[h]]
   W <- names(pah)
+  nodes <- rownames(ac)
   aw <- A
   A1 <- A
   A1[,W] <- 0
   for(w in W){
-    prob <- NULL
+#   prob <- NULL
     np <- length(pah[[w]])
+    prob <- double(np)
     paw <- list()
     for(j in seq_len(np)){
       pa <- pah[[w]][j]
       paw[[j]] <- nodes[which(ac[,pa]==1)]
       sc <- cache[w,pa]
-      prob <- c(prob,sc)
+#     prob <- c(prob,sc)
+      prob[j] <- sc
     }
     prob <- prob-max(prob)
     prob <- exp(prob)
